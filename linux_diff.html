@@ -1,0 +1,76 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HAMMER2 — reference vs ports</title><style>:root{--bg:#eef1f4;--paper:#fff;--ink:#111721;--body:#3b434f;--muted:#6b7480;--line:#d7dce3;--ok:#0e8f8f;--div:#5a54c9;--stub:#bf3428;--miss:#b5651d;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}@media(prefers-color-scheme:dark){:root{--bg:#0e1218;--paper:#171c24;--ink:#eef1f5;--body:#bcc3ce;--muted:#828b98;--line:#28303b;--ok:#43c8c0;--div:#8f89ef;--stub:#e5776b;--miss:#e0a458}}:root[data-theme="dark"]{--bg:#0e1218;--paper:#171c24;--ink:#eef1f5;--body:#bcc3ce;--muted:#828b98;--line:#28303b;--ok:#43c8c0;--div:#8f89ef;--stub:#e5776b;--miss:#e0a458}:root[data-theme="light"]{--bg:#eef1f4;--paper:#fff;--ink:#111721;--body:#3b434f;--muted:#6b7480;--line:#d7dce3;--ok:#0e8f8f;--div:#5a54c9;--stub:#bf3428;--miss:#b5651d}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--body);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}.wrap{max-width:1000px;margin:0 auto;padding:48px 22px 96px}h1{color:var(--ink);font-size:2rem;letter-spacing:-.02em;margin:0 0 8px}h2{color:var(--ink);font-size:1.25rem;margin:44px 0 10px}.lede{color:var(--muted);max-width:70ch}table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:.9rem}th,td{padding:8px 12px;text-align:right;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}th{background:color-mix(in srgb,var(--paper) 80%,var(--bg));font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}td{font-family:var(--mono);font-variant-numeric:tabular-nums}.n{color:var(--ink)}.z{color:var(--muted);opacity:.45}.ok{color:var(--ok)}.div{color:var(--div)}.stub{color:var(--stub);font-weight:700}.miss{color:var(--miss);font-weight:700}.tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}.tag.stub{background:color-mix(in srgb,var(--stub) 15%,transparent)}.tag.miss{background:color-mix(in srgb,var(--miss) 15%,transparent)}.tag.div{background:color-mix(in srgb,var(--div) 15%,transparent)}h3{color:var(--ink);font-family:var(--mono);font-size:.95rem;margin:26px 0 8px}details{background:var(--paper);border:1px solid var(--line);border-radius:8px;margin:6px 0;overflow:hidden}summary{cursor:pointer;padding:7px 12px;font-family:var(--mono);font-size:.83rem;color:var(--ink);user-select:none}summary:hover{background:color-mix(in srgb,var(--paper) 85%,var(--bg))}summary .st{color:var(--muted);font-size:.75rem;margin-left:8px}pre.diff{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:11.5px;line-height:1.5;border-top:1px solid var(--line);background:color-mix(in srgb,var(--paper) 92%,var(--bg))}pre.diff span{display:block;white-space:pre}pre.diff .add{color:var(--ok);background:color-mix(in srgb,var(--ok) 11%,transparent)}pre.diff .del{color:var(--stub);background:color-mix(in srgb,var(--stub) 11%,transparent)}pre.diff .hunk{color:var(--div);opacity:.85}pre.diff .meta{color:var(--muted);opacity:.6}pre.diff .ctx{color:var(--muted);opacity:.75}pre.diff .fold{color:var(--muted);opacity:.5;font-style:italic}pre.diff .addfmt{color:var(--muted);opacity:.55}pre.diff .delfmt{color:var(--muted);opacity:.55}</style></head><body><div class="wrap">
+<h1>HAMMER2 — reference vs ports</h1>
+<p class="lede">Function-level divergence against the DragonFly reference at <code>/home/brad/Documents/linux7_hammer2_clean</code>. Mechanical glue (allocator/printf shims, comments, formatting) is normalized away, so only behavioural deltas remain. <b class="stub">STUB</b> = port body is trivial where the reference is not; <b class="miss">MISSING</b> = never ported.</p>
+<h2>Port: linux</h2>
+<table><thead><tr><th>File</th><th>Same</th><th>Divergent</th><th>Stub</th><th>Missing</th><th>Macro</th><th>Added</th></tr></thead><tbody>
+<tr><td class="n">hammer2.h</td><td class="z">0</td><td class="div">4</td><td class="stub">1</td><td class="miss">1</td><td class="n">1</td><td class="n">4</td></tr>
+<tr><td class="n">hammer2_admin.c</td><td class="ok">11</td><td class="div">11</td><td class="stub">3</td><td class="miss">8</td><td class="z">0</td><td class="n">11</td></tr>
+<tr><td class="n">hammer2_bulkfree.c</td><td class="ok">1</td><td class="div">10</td><td class="z">0</td><td class="miss">1</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_ccms.c</td><td class="ok">12</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_chain.c</td><td class="ok">9</td><td class="div">46</td><td class="stub">1</td><td class="miss">4</td><td class="z">0</td><td class="n">5</td></tr>
+<tr><td class="n">hammer2_cluster.c</td><td class="ok">2</td><td class="div">4</td><td class="z">0</td><td class="miss">4</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_flush.c</td><td class="ok">5</td><td class="div">7</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_freemap.c</td><td class="ok">1</td><td class="div">6</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_inode.c</td><td class="ok">7</td><td class="div">23</td><td class="z">0</td><td class="miss">3</td><td class="z">0</td><td class="n">3</td></tr>
+<tr><td class="n">hammer2_io.c</td><td class="ok">3</td><td class="div">20</td><td class="z">0</td><td class="miss">5</td><td class="z">0</td><td class="n">6</td></tr>
+<tr><td class="n">hammer2_iocom.c</td><td class="ok">5</td><td class="div">2</td><td class="stub">1</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_ioctl.c</td><td class="ok">1</td><td class="div">15</td><td class="z">0</td><td class="miss">6</td><td class="z">0</td><td class="n">4</td></tr>
+<tr><td class="n">hammer2_lz4.c</td><td class="ok">4</td><td class="div">2</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_lz4_encoder.h</td><td class="ok">2</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_msgops.c</td><td class="ok">2</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_ondisk.c</td><td class="z">0</td><td class="div">12</td><td class="z">0</td><td class="miss">1</td><td class="z">0</td><td class="n">3</td></tr>
+<tr><td class="n">hammer2_strategy.c</td><td class="ok">2</td><td class="div">16</td><td class="z">0</td><td class="miss">3</td><td class="z">0</td><td class="n">1</td></tr>
+<tr><td class="n">hammer2_subr.c</td><td class="ok">8</td><td class="div">5</td><td class="z">0</td><td class="miss">4</td><td class="z">0</td><td class="n">8</td></tr>
+<tr><td class="n">hammer2_synchro.c</td><td class="ok">5</td><td class="div">2</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="z">0</td></tr>
+<tr><td class="n">hammer2_xops.c</td><td class="ok">1</td><td class="div">18</td><td class="z">0</td><td class="z">0</td><td class="z">0</td><td class="n">1</td></tr>
+<tr><td class="n"><b>TOTAL</b></td><td class="ok"><b>81</b></td><td class="div"><b>203</b></td><td class="stub"><b>6</b></td><td class="miss"><b>40</b></td><td class="n"><b>1</b></td><td class="n"><b>46</b></td></tr>
+</tbody></table>
+<h2>Needs review — stubbed or unported</h2><table><thead><tr><th>Verdict</th><th>File</th><th>Function</th><th>Ref stmts</th><th>Port stmts</th></tr></thead><tbody>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2.h</td><td class="n">_hammer2_xop_gdata</td><td>10</td><td>1</td></tr>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_thr_wait</td><td>10</td><td>1</td></tr>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_thr_wait_neg</td><td>10</td><td>1</td></tr>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_feed</td><td>24</td><td>1</td></tr>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2_chain.c</td><td class="n">hammer2_chain_lookup</td><td>103</td><td>1</td></tr>
+<tr><td><span class="tag stub">STUB</span></td><td class="n">hammer2_iocom.c</td><td class="n">hammer2_volconf_update</td><td>8</td><td>2</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2.h</td><td class="n">hammer2_knote</td><td>1</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_reinit</td><td>4</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_helper_create</td><td>12</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_helper_cleanup</td><td>12</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">xop_testhash</td><td>6</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">xop_sethash</td><td>6</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_next</td><td>15</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_xop_dequeue</td><td>7</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_admin.c</td><td class="n">hammer2_primary_xops_thread</td><td>35</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_bulkfree.c</td><td class="n">hammer2_bulkfree_thread</td><td>19</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_chain.c</td><td class="n">hammer2_chain_lock_unhold</td><td>2</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_chain.c</td><td class="n">hammer2_chain_lock_downgrade</td><td>1</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_chain.c</td><td class="n">hammer2_chain_unlock_hold</td><td>2</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_chain.c</td><td class="n">hammer2_characterize_failed_chain</td><td>24</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_cluster.c</td><td class="n">hammer2_cluster_ref</td><td>1</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_cluster.c</td><td class="n">hammer2_cluster_drop</td><td>12</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_cluster.c</td><td class="n">hammer2_cluster_lock</td><td>11</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_cluster.c</td><td class="n">hammer2_cluster_unlock</td><td>10</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_inode.c</td><td class="n">hammer2_inode_lock_upgrade</td><td>6</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_inode.c</td><td class="n">hammer2_inode_lock_downgrade</td><td>1</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_inode.c</td><td class="n">hammer2_inode_vprecycle</td><td>5</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_io.c</td><td class="n">DIO_RECORD</td><td>6</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_io.c</td><td class="n">hammer2_io_inval</td><td>0</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_io.c</td><td class="n">dio_write_stats_update</td><td>2</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_io.c</td><td class="n">hammer2_io_bkvasync</td><td>2</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_io.c</td><td class="n">_hammer2_io_ref</td><td>2</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_remote_scan</td><td>13</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_remote_add</td><td>20</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_remote_del</td><td>21</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_remote_rep</td><td>10</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_socket_get</td><td>1</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ioctl.c</td><td class="n">hammer2_ioctl_socket_set</td><td>9</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_ondisk.c</td><td class="n">hammer2_lookup_device</td><td>19</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_strategy.c</td><td class="n">hammer2_vop_strategy</td><td>14</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_strategy.c</td><td class="n">hammer2_vop_bmap_impl</td><td>18</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_strategy.c</td><td class="n">hammer2_vop_bmap</td><td>5</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_subr.c</td><td class="n">hammer2_adjreadcounter</td><td>13</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_subr.c</td><td class="n">hammer2_adjwritecounter</td><td>13</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_subr.c</td><td class="n">hammer2_error_str</td><td>20</td><td>0</td></tr>
+<tr><td><span class="tag miss">MISSING</span></td><td class="n">hammer2_subr.c</td><td class="n">hammer2_bref_type_str</td><td>11</td><td>0</td></tr>
+</tbody></table>
+</div></body></html>
