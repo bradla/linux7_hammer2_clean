@@ -1,37 +1,3 @@
-/*
- * Copyright (c) 2013-2023 The DragonFly Project.  All rights reserved.
- *
- * This code is derived from software contributed to The DragonFly Project
- * by Matthew Dillon <dillon@dragonflybsd.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of The DragonFly Project nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific, prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
- * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
-
 #include "hammer2.h"
 
 #define HAMMER2_DOP_READ	1
@@ -39,15 +5,6 @@
 #define HAMMER2_DOP_NEWNZ	3
 #define HAMMER2_DOP_READQ	4
 
-/*
- * Implements an abstraction layer for synchronous and asynchronous
- * buffered device I/O.  Can be used as an OS-abstraction but the main
- * purpose is to allow larger buffers to be used against hammer2_chain's
- * using smaller allocations, without causing deadlocks.
- *
- * The DIOs also record temporary state with limited persistence.  This
- * feature is used to keep track of dedupable blocks.
- */
 static void dio_write_stats_update(hammer2_io_t *dio, struct buf *bp);
 
 static hammer2_io_t *hammer2_io_hash_lookup(hammer2_dev_t *hmp,
@@ -89,12 +46,6 @@ DIO_RECORD(hammer2_io_t *dio HAMMER2_IO_DEBUG_ARGS)
 
 #endif
 
-/*
- * Returns the DIO corresponding to the data|radix, creating it if necessary.
- *
- * If createit is 0, NULL can be returned indicating that the DIO does not
- * exist.  (btype) is ignored when createit is 0.
- */
 static __inline
 hammer2_io_t *
 hammer2_io_alloc(hammer2_dev_t *hmp, hammer2_off_t data_off, uint8_t btype,
@@ -126,13 +77,6 @@ hammer2_io_alloc(hammer2_dev_t *hmp, hammer2_off_t data_off, uint8_t btype,
 	KKASSERT(pbase != 0 && ((lbase + lsize - 1) & pmask) == pbase);
 	*isgoodp = 0;
 
-	/*
-	 * Access/Allocate the DIO, bump dio->refs to prevent destruction.
-	 *
-	 * If DIO_GOOD is set the ref should prevent it from being cleared
-	 * out from under us, we can set *isgoodp, and the caller can operate
-	 * on the buffer without any further interaction.
-	 */
 	dio = hammer2_io_hash_lookup(hmp, pbase, &refs);
 	if (dio) {
 		if (refs & HAMMER2_DIO_GOOD)
@@ -169,10 +113,6 @@ hammer2_io_alloc(hammer2_dev_t *hmp, hammer2_off_t data_off, uint8_t btype,
 	return dio;
 }
 
-/*
- * Acquire the requested dio.  If DIO_GOOD is not set we must instantiate
- * a buffer.  If set the buffer already exists and is good to go.
- */
 hammer2_io_t *
 _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		   int lsize, int op HAMMER2_IO_DEBUG_ARGS)
@@ -205,9 +145,6 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		orefs = dio->refs;
 		cpu_ccfence();
 
-		/*
-		 * Buffer is already good, handle the op and return.
-		 */
 		if (orefs & HAMMER2_DIO_GOOD) {
 			if (isgood == 0)
 				cpu_mfence();
@@ -216,29 +153,23 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 			switch(op) {
 			case HAMMER2_DOP_NEW:
 				bzero(hammer2_io_data(dio, lbase), lsize);
-				/* fall through */
 			case HAMMER2_DOP_NEWNZ:
 				atomic_set_long(&dio->refs, HAMMER2_DIO_DIRTY);
 				break;
 			case HAMMER2_DOP_READ:
 			default:
-				/* nothing to do */
 				break;
 			}
 			DIO_RECORD(dio HAMMER2_IO_DEBUG_CALL);
 			return (dio);
 		}
 
-		/*
-		 * Try to own the DIO
-		 */
 		if (orefs & HAMMER2_DIO_INPROG) {
 			nrefs = orefs | HAMMER2_DIO_WAITING;
 			tsleep_interlock(dio, 0);
 			if (atomic_cmpset_64(&dio->refs, orefs, nrefs)) {
 				tsleep(dio, PINTERLOCKED, "h2dio", hz);
 			}
-			/* retry */
 		} else {
 			nrefs = orefs | HAMMER2_DIO_INPROG;
 			if (atomic_cmpset_64(&dio->refs, orefs, nrefs)) {
@@ -247,10 +178,6 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		}
 	}
 
-	/*
-	 * We break to here if GOOD is not set and we acquired INPROG for
-	 * the I/O.
-	 */
 	KKASSERT(dio->bp == NULL);
 	if (btype == HAMMER2_BREF_TYPE_DATA)
 		hce = hammer2_cluster_data_read;
@@ -277,9 +204,6 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		default:
 			KKASSERT(dio->bp == NULL);
 			if (hce > 0) {
-				/*
-				 * Synchronous cluster I/O for now.
-				 */
 				peof = (dio->pbase + HAMMER2_SEGMASK64) &
 				       ~HAMMER2_SEGMASK64;
 				peof -= dio->dbase;
@@ -298,9 +222,6 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		}
 	} else {
 		if (hce > 0) {
-			/*
-			 * Synchronous cluster I/O for now.
-			 */
 			peof = (dio->pbase + HAMMER2_SEGMASK64) &
 			       ~HAMMER2_SEGMASK64;
 			peof -= dio->dbase;
@@ -315,14 +236,10 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 					NULL, NULL, 0, &dio->bp);
 		}
 		if (dio->bp) {
-			/*
-			 * Handle NEW flags
-			 */
 			switch(op) {
 			case HAMMER2_DOP_NEW:
 				bkvasync(dio->bp);
 				bzero(hammer2_io_data(dio, lbase), lsize);
-				/* fall through */
 			case HAMMER2_DOP_NEWNZ:
 				atomic_set_long(&dio->refs, HAMMER2_DIO_DIRTY);
 				break;
@@ -331,12 +248,6 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 				break;
 			}
 
-			/*
-			 * Tell the kernel that the buffer cache is not
-			 * meta-data based on the btype.  This allows
-			 * swapcache to distinguish between data and
-			 * meta-data.
-			 */
 			switch(btype) {
 			case HAMMER2_BREF_TYPE_DATA:
 				dio->bp->b_flags |= B_NOTMETA;
@@ -351,13 +262,9 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		bkvasync(dio->bp);
 		BUF_KERNPROC(dio->bp);
 		dio->bp->b_flags &= ~B_AGE;
-		/* dio->bp->b_debug_info2 = dio; */
 	}
 	dio->error = error;
 
-	/*
-	 * Clear INPROG and WAITING, set GOOD wake up anyone waiting.
-	 */
 	for (;;) {
 		orefs = dio->refs;
 		cpu_ccfence();
@@ -372,18 +279,11 @@ _hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase,
 		cpu_pause();
 	}
 
-	/* XXX error handling */
 	DIO_RECORD(dio HAMMER2_IO_DEBUG_CALL);
 
 	return dio;
 }
 
-/*
- * Release our ref on *diop.
- *
- * On the 1->0 transition we clear DIO_GOOD, set DIO_INPROG, and dispose
- * of dio->bp.  Then we clean up DIO_INPROG and DIO_WAITING.
- */
 void
 _hammer2_io_putblk(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 {
@@ -403,85 +303,40 @@ _hammer2_io_putblk(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 
 	KKASSERT((dio->refs & HAMMER2_DIO_MASK) != 0);
 
-	/*
-	 * Drop refs.
-	 *
-	 * On the 1->0 transition clear GOOD and set INPROG, and break.
-	 * On any other transition we can return early.
-	 */
 	for (;;) {
 		orefs = dio->refs;
 		cpu_ccfence();
 
 		if ((orefs & HAMMER2_DIO_MASK) == 1 &&
 		    (orefs & HAMMER2_DIO_INPROG) == 0) {
-			/*
-			 * Lastdrop case, INPROG can be set.  GOOD must be
-			 * cleared to prevent the getblk shortcut.
-			 */
 			nrefs = orefs - 1;
 			nrefs &= ~(HAMMER2_DIO_GOOD | HAMMER2_DIO_DIRTY);
 			nrefs |= HAMMER2_DIO_INPROG;
 			if (atomic_cmpset_64(&dio->refs, orefs, nrefs))
 				break;
 		} else if ((orefs & HAMMER2_DIO_MASK) == 1) {
-			/*
-			 * Lastdrop case, INPROG already set.  We must
-			 * wait for INPROG to clear.
-			 */
 			nrefs = orefs | HAMMER2_DIO_WAITING;
 			tsleep_interlock(dio, 0);
 			if (atomic_cmpset_64(&dio->refs, orefs, nrefs)) {
 				tsleep(dio, PINTERLOCKED, "h2dio", hz);
 			}
-			/* retry */
 		} else {
-			/*
-			 * Normal drop case.
-			 */
 			nrefs = orefs - 1;
 			if (atomic_cmpset_64(&dio->refs, orefs, nrefs))
 				return;
-			/* retry */
 		}
 		cpu_pause();
-		/* retry */
 	}
 
-	/*
-	 * Lastdrop (1->0 transition).  INPROG has been set, GOOD and DIRTY
-	 * have been cleared.  iofree_count has not yet been incremented,
-	 * note that another accessor race will decrement iofree_count so
-	 * we have to increment it regardless.
-	 * We can now dispose of the buffer.
-	 */
 	pbase = dio->pbase;
 	psize = dio->psize;
 	bp = dio->bp;
 	dio->bp = NULL;
 
 	if ((orefs & HAMMER2_DIO_GOOD) && bp) {
-		/*
-		 * Non-errored disposal of bp
-		 */
 		if (orefs & HAMMER2_DIO_DIRTY) {
 			dio_write_stats_update(dio, bp);
 
-			/*
-			 * Allows dirty buffers to accumulate and
-			 * possibly be canceled (e.g. by a 'rm'),
-			 * by default we will burst-write later.
-			 *
-			 * We generally do NOT want to issue an actual
-			 * b[a]write() or cluster_write() here.  Due to
-			 * the way chains are locked, buffers may be cycled
-			 * in and out quite often and disposal here can cause
-			 * multiple writes or write-read stalls.
-			 *
-			 * If FLUSH is set we do want to issue the actual
-			 * write.  This typically occurs in the write-behind
-			 * case when writing to large files.
-			 */
 			off_t peof;
 			int hce;
 			if (dio->refs & HAMMER2_DIO_FLUSH) {
@@ -505,23 +360,12 @@ _hammer2_io_putblk(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 			bqrelse(bp);
 		}
 	} else if (bp) {
-		/*
-		 * Errored disposal of bp
-		 */
 		brelse(bp);
 	}
 
-	/*
-	 * Update iofree_count before disposing of the dio
-	 */
 	hmp = dio->hmp;
 	atomic_add_int(&hmp->iofree_count, 1);
 
-	/*
-	 * Clear INPROG, GOOD, and WAITING (GOOD should already be clear).
-	 *
-	 * Also clear FLUSH as it was handled above.
-	 */
 	for (;;) {
 		orefs = dio->refs;
 		cpu_ccfence();
@@ -535,10 +379,6 @@ _hammer2_io_putblk(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 		cpu_pause();
 	}
 
-	/*
-	 * We cache free buffers so re-use cases can use a shared lock, but
-	 * if too many build up we have to clean them out.
-	 */
 	dio_limit = hammer2_dio_limit;
 	if (dio_limit < 256)
 		dio_limit = 256;
@@ -548,9 +388,6 @@ _hammer2_io_putblk(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 		hammer2_io_hash_cleanup(hmp, dio_limit);
 }
 
-/*
- * Returns a pointer to the requested data.
- */
 char *
 hammer2_io_data(hammer2_io_t *dio, off_t lbase)
 {
@@ -635,7 +472,7 @@ _hammer2_io_bwrite(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 	atomic_set_64(&(*diop)->refs, HAMMER2_DIO_DIRTY |
 				      HAMMER2_DIO_FLUSH);
 	_hammer2_io_putblk(diop HAMMER2_IO_DEBUG_CALL);
-	return (0);	/* XXX */
+	return (0);
 }
 
 void
@@ -644,26 +481,9 @@ hammer2_io_setdirty(hammer2_io_t *dio)
 	atomic_set_64(&dio->refs, HAMMER2_DIO_DIRTY);
 }
 
-/*
- * This routine is called when a MODIFIED chain is being DESTROYED,
- * in an attempt to allow the related buffer cache buffer to be
- * invalidated and discarded instead of flushing it to disk.
- *
- * At the moment this case is only really useful for file meta-data.
- * File data is already handled via the logical buffer cache associated
- * with the vnode, and will be discarded if it was never flushed to disk.
- * File meta-data may include inodes, directory entries, and indirect blocks.
- *
- * XXX
- * However, our DIO buffers are PBUFSIZE'd (64KB), and the area being
- * invalidated might be smaller.  Most of the meta-data structures above
- * are in the 'smaller' category.  For now, don't try to invalidate the
- * data areas.
- */
 void
 hammer2_io_inval(hammer2_io_t *dio, hammer2_off_t data_off, u_int bytes)
 {
-	/* NOP */
 }
 
 void
@@ -678,11 +498,6 @@ _hammer2_io_bqrelse(hammer2_io_t **diop HAMMER2_IO_DEBUG_ARGS)
 	_hammer2_io_putblk(diop HAMMER2_IO_DEBUG_CALL);
 }
 
-/*
- * Set dedup validation bits in a DIO.  We do not need the buffer cache
- * buffer for this.  This must be done concurrent with setting bits in
- * the freemap so as to interlock with bulkfree's clearing of those bits.
- */
 void
 hammer2_io_dedup_set(hammer2_dev_t *hmp, hammer2_blockref_t *bref)
 {
@@ -702,12 +517,6 @@ hammer2_io_dedup_set(hammer2_dev_t *hmp, hammer2_blockref_t *bref)
 	hammer2_io_putblk(&dio);
 }
 
-/*
- * Clear dedup validation bits in a DIO.  This is typically done when
- * a modified chain is destroyed or by the bulkfree code.  No buffer
- * is needed for this operation.  If the DIO no longer exists it is
- * equivalent to the bits not being set.
- */
 void
 hammer2_io_dedup_delete(hammer2_dev_t *hmp, uint8_t btype,
 			hammer2_off_t data_off, u_int bytes)
@@ -736,10 +545,6 @@ hammer2_io_dedup_delete(hammer2_dev_t *hmp, uint8_t btype,
 	}
 }
 
-/*
- * Assert that dedup allocation bits in a DIO are not set.  This operation
- * does not require a buffer.  The DIO does not need to exist.
- */
 void
 hammer2_io_dedup_assert(hammer2_dev_t *hmp, hammer2_off_t data_off, u_int bytes)
 {
@@ -776,9 +581,6 @@ hammer2_io_bkvasync(hammer2_io_t *dio)
 	bkvasync(dio->bp);
 }
 
-/*
- * Ref a dio that is already owned
- */
 void
 _hammer2_io_ref(hammer2_io_t *dio HAMMER2_IO_DEBUG_ARGS)
 {
@@ -795,9 +597,6 @@ hammer2_io_hashv(hammer2_dev_t *hmp, hammer2_off_t pbase)
 	return (&hmp->iohash[hv & HAMMER2_IOHASH_MASK]);
 }
 
-/*
- * Lookup and reference the requested dio
- */
 static hammer2_io_t *
 hammer2_io_hash_lookup(hammer2_dev_t *hmp, hammer2_off_t pbase, uint64_t *refsp)
 {
@@ -822,11 +621,6 @@ hammer2_io_hash_lookup(hammer2_dev_t *hmp, hammer2_off_t pbase, uint64_t *refsp)
 	return dio;
 }
 
-/*
- * Enter a dio into the hash.  If the pbase already exists in the hash,
- * the xio in the hash is referenced and returned.  If dio is sucessfully
- * entered into the hash, NULL is returned.
- */
 static hammer2_io_t *
 hammer2_io_hash_enter(hammer2_dev_t *hmp, hammer2_io_t *dio, uint64_t *refsp)
 {
@@ -855,9 +649,6 @@ done:
 	return xio;
 }
 
-/*
- * Clean out a limited number of freeable DIOs
- */
 static void
 hammer2_io_hash_cleanup(hammer2_dev_t *hmp, int dio_limit)
 {
@@ -905,16 +696,12 @@ hammer2_io_hash_cleanup(hammer2_dev_t *hmp, int dio_limit)
 			*cleanapp = dio;
 			cleanapp = &dio->next;
 			--count;
-			/* diop remains unchanged */
 			atomic_add_int(&hmp->iofree_count, -1);
 		}
 		hammer2_spin_unex(&hash->spin);
 		i = hmp->io_iterator++;
 	}
 
-	/*
-	 * Get rid of dios on clean list without holding any locks
-	 */
 	while ((dio = cleanbase) != NULL) {
 		cleanbase = dio->next;
 		dio->next = NULL;
@@ -931,9 +718,6 @@ hammer2_io_hash_cleanup(hammer2_dev_t *hmp, int dio_limit)
 	}
 }
 
-/*
- * Destroy all DIOs associated with the media
- */
 void
 hammer2_io_hash_cleanup_all(hammer2_dev_t *hmp)
 {

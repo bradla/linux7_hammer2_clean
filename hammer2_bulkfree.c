@@ -1,36 +1,3 @@
-/*
- * Copyright (c) 2013-2019 The DragonFly Project.  All rights reserved.
- *
- * This code is derived from software contributed to The DragonFly Project
- * by Matthew Dillon <dillon@dragonflybsd.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of The DragonFly Project nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific, prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
- * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -41,9 +8,6 @@
 
 #include "hammer2.h"
 
-/*
- * breadth-first search
- */
 typedef struct hammer2_chain_save {
 	TAILQ_ENTRY(hammer2_chain_save)	entry;
 	hammer2_chain_t	*chain;
@@ -55,15 +19,15 @@ typedef struct hammer2_chain_save_list hammer2_chain_save_list_t;
 typedef struct hammer2_bulkfree_info {
 	hammer2_dev_t		*hmp;
 	kmem_anon_desc_t	kp;
-	hammer2_off_t		sbase;		/* sub-loop iteration */
+	hammer2_off_t		sbase;
 	hammer2_off_t		sstop;
 	hammer2_bmap_data_t	*bmap;
 	int			depth;
-	long			count_10_00;	/* staged->free	     */
-	long			count_11_10;	/* allocated->staged */
-	long			count_00_11;	/* (should not happen) */
-	long			count_01_11;	/* (should not happen) */
-	long			count_10_11;	/* staged->allocated */
+	long			count_10_00;
+	long			count_11_10;
+	long			count_00_11;
+	long			count_01_11;
+	long			count_10_11;
 	long			count_l0cleans;
 	long			count_linadjusts;
 	long			count_inodes_scanned;
@@ -81,7 +45,7 @@ typedef struct hammer2_bulkfree_info {
 	hammer2_chain_save_list_t list;
 	long			list_count;
 	long			list_count_max;
-	hammer2_chain_save_t	*backout;	/* ins pt while backing out */
+	hammer2_chain_save_t	*backout;
 	hammer2_dedup_t		*dedup;
 	int			pri;
 } hammer2_bulkfree_info_t;
@@ -91,10 +55,6 @@ static int h2_bulkfree_test(hammer2_bulkfree_info_t *info,
 static uint32_t bigmask_get(hammer2_bmap_data_t *bmap);
 static int bigmask_good(hammer2_bmap_data_t *bmap, uint32_t live_bigmask);
 
-/*
- * General bulk scan function with callback.  Called with a referenced
- * but UNLOCKED parent.  The parent is returned in the same state.
- */
 static
 int
 hammer2_bulkfree_scan(hammer2_chain_t *parent,
@@ -120,74 +80,33 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 	hammer2_chain_lock(parent, HAMMER2_RESOLVE_ALWAYS |
 				   HAMMER2_RESOLVE_SHARED);
 
-	/*
-	 * End of scan if parent is a PFS
-	 */
 	tail = TAILQ_FIRST(&info->list);
 
-	/*
-	 * The parent was previously retrieved NODATA and thus has not
-	 * tested the CRC.  Now that we have locked it normally, check
-	 * for a CRC problem and skip it if we found one.  The bulk scan
-	 * cannot safely traverse invalid block tables (we could end up
-	 * in an endless loop or cause a panic).
-	 */
 	if (parent->error & HAMMER2_ERROR_CHECK) {
 		error = parent->error;
 		goto done;
 	}
 
-	/*
-	 * Report which PFS is being scanned
-	 */
 	if (parent->bref.type == HAMMER2_BREF_TYPE_INODE &&
 	    (parent->bref.flags & HAMMER2_BREF_FLAG_PFSROOT)) {
 		kprintf("hammer2_bulkfree: Scanning %s\n",
 			parent->data->ipdata.filename);
 	}
 
-	/*
-	 * Generally loop on the contents if we have not been flagged
-	 * for abort.
-	 *
-	 * Remember that these chains are completely isolated from
-	 * the frontend, so we can release locks temporarily without
-	 * imploding.
-	 */
 	for (;;) {
 		error |= hammer2_chain_scan(parent, &chain, &bref, &first,
 					    HAMMER2_LOOKUP_NODATA |
 					    HAMMER2_LOOKUP_SHARED);
 
-		/*
-		 * Handle EOF or other error at current level.  This stops
-		 * the bulkfree scan.
-		 */
 		if (error & ~HAMMER2_ERROR_CHECK)
 			break;
 
-		/*
-		 * Account for dirents before thre data_off test, since most
-		 * dirents do not need a data reference.
-		 */
 		if (bref.type == HAMMER2_BREF_TYPE_DIRENT)
 			++info->count_dirents_scanned;
 
-		/*
-		 * Ignore brefs without data (typically dirents)
-		 */
 		if ((bref.data_off & ~HAMMER2_OFF_MASK_RADIX) == 0)
 			continue;
 
-		/*
-		 * Process bref, chain is only non-NULL if the bref
-		 * might be recursable (its possible that we sometimes get
-		 * a non-NULL chain where the bref cannot be recursed).
-		 *
-		 * If we already ran down this tree we do not have to do it
-		 * again, but we must still recover any cumulative error
-		 * recorded from the time we did.
-		 */
 		++info->pri;
 		e2 = h2_bulkfree_test(info, &bref, 1, 0);
 		if (e2) {
@@ -202,11 +121,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 		if (error & ~HAMMER2_ERROR_CHECK)
 			break;
 
-		/*
-		 * A non-null chain is always returned if it is
-		 * recursive, otherwise a non-null chain might be
-		 * returned but usually is not when not recursive.
-		 */
 		if (chain == NULL)
 			continue;
 
@@ -228,11 +142,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 				info->count_chains_scanned;
 		}
 
-		/*
-		 * Else check type and setup depth-first scan.
-		 *
-		 * Account for bytes actually read.
-		 */
 		switch(chain->bref.type) {
 		case HAMMER2_BREF_TYPE_INODE:
 		case HAMMER2_BREF_TYPE_FREEMAP_NODE:
@@ -241,31 +150,12 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 		case HAMMER2_BREF_TYPE_FREEMAP:
 			++info->depth;
 			if (chain->error & HAMMER2_ERROR_CHECK) {
-				/*
-				 * Cannot safely recurse chains with crc
-				 * errors, even in emergency mode.
-				 */
-				/* NOP */
 			} else if (info->depth > 16 ||
 				   info->backout ||
 				   (info->depth > hammer2_limit_saved_depth &&
 				   info->list_count >=
 				    (hammer2_limit_saved_chains >> 2)))
 			{
-				/*
-				 * We must defer the recursion if it runs
-				 * too deep or if too many saved chains are
-				 * allocated.
-				 *
-				 * In the case of too many saved chains, we
-				 * have to stop recursing ASAP to avoid an
-				 * explosion of memory use since each radix
-				 * level can hold 512 elements.
-				 *
-				 * If we had to defer at a deeper level
-				 * backout is non-NULL.  We must backout
-				 * completely before resuming.
-				 */
 				if (info->list_count >
 				     hammer2_limit_saved_chains &&
 				    info->list_alert == 0)
@@ -280,33 +170,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 					info->list_alert = 1;
 				}
 
-				/*
-				 * Must be placed at head so pfsroot scan
-				 * can exhaust saved elements for that pfs
-				 * first.
-				 *
-				 * Must be placed at head for depth-first
-				 * recovery when too many saved chains, to
-				 * limit number of chains saved during
-				 * saved-chain reruns.  The worst-case excess
-				 * is (maximum_depth * 512) saved chains above
-				 * the threshold.
-				 *
-				 * The maximum_depth generally occurs in the
-				 * inode index and can be fairly deep once
-				 * the radix tree becomes a bit fragmented.
-				 * nominally 100M inodes would be only 4 deep,
-				 * plus a maximally sized file would be another
-				 * 8 deep, but with fragmentation it can wind
-				 * up being a lot more.
-				 *
-				 * However, when backing out, we have to place
-				 * all the entries in each parent node not
-				 * yet processed on the list too, and because
-				 * these entries are shallower they must be
-				 * placed after each other in order to maintain
-				 * our depth-first processing.
-				 */
 				save = kmalloc(sizeof(*save), M_HAMMER2,
 					       M_WAITOK | M_ZERO);
 				save->chain = chain;
@@ -325,7 +188,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 				if (info->list_count_max < info->list_count)
 					info->list_count_max = info->list_count;
 
-				/* guess */
 				info->pri += 10;
 			} else {
 				int savepri = info->pri;
@@ -348,7 +210,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 		case HAMMER2_BREF_TYPE_DATA:
 			break;
 		default:
-			/* does not recurse */
 			break;
 		}
 		if (rup_error & HAMMER2_ERROR_ABORTED)
@@ -359,18 +220,13 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 		hammer2_chain_drop(chain);
 	}
 
-	/*
-	 * If this is a PFSROOT, also re-run any defered elements
-	 * added during our scan so we can report any cumulative errors
-	 * for the PFS.
-	 */
 	if (parent->bref.type == HAMMER2_BREF_TYPE_INODE &&
 	    (parent->bref.flags & HAMMER2_BREF_FLAG_PFSROOT)) {
 		for (;;) {
 			int opri;
 
 			save = TAILQ_FIRST(&info->list);
-			if (save == tail)	/* exhaust this PFS only */
+			if (save == tail)
 				break;
 
 			TAILQ_REMOVE(&info->list, save, entry);
@@ -387,9 +243,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 
 	error |= rup_error;
 
-	/*
-	 * Report which PFS the errors were encountered in.
-	 */
 	if (parent->bref.type == HAMMER2_BREF_TYPE_INODE &&
 	    (parent->bref.flags & HAMMER2_BREF_FLAG_PFSROOT) &&
 	    (error & ~HAMMER2_ERROR_EOF)) {
@@ -398,9 +251,6 @@ hammer2_bulkfree_scan(hammer2_chain_t *parent,
 			error, parent->data->ipdata.filename);
 	}
 
-	/*
-	 * Save with higher pri now that we know what it is.
-	 */
 	h2_bulkfree_test(info, &parent->bref, info->pri + 1,
 			 (error & ~HAMMER2_ERROR_EOF));
 
@@ -410,38 +260,6 @@ done:
 	return (error & ~HAMMER2_ERROR_EOF);
 }
 
-/*
- * Bulkfree algorithm
- *
- * Repeat {
- *	Chain flush (partial synchronization) XXX removed
- *	Scan the whole topology - build in-memory freemap (mark 11)
- *	Reconcile the in-memory freemap against the on-disk freemap.
- *		ondisk xx -> ondisk 11 (if allocated)
- *		ondisk 11 -> ondisk 10 (if free in-memory)
- *		ondisk 10 -> ondisk 00 (if free in-memory) - on next pass
- * }
- *
- * The topology scan may have to be performed multiple times to window
- * freemaps which are too large to fit in kernel memory.
- *
- * Races are handled using a double-transition (11->10, 10->00).  The bulkfree
- * scan snapshots the volume root's blockset and thus can run concurrent with
- * normal operations, as long as a full flush is made between each pass to
- * synchronize any modified chains (otherwise their blocks might be improperly
- * freed).
- *
- * Temporary memory in multiples of 32KB is required to reconstruct the leaf
- * hammer2_bmap_data blocks so they can later be compared against the live
- * freemap.  Each 32KB represents 256 x 16KB x 256 = ~1 GB of storage.
- * A 32MB save area thus represents around ~1 TB.  The temporary memory
- * allocated can be specified.  If it is not sufficient multiple topology
- * passes will be made.
- */
-
-/*
- * Bulkfree callback info
- */
 static void hammer2_bulkfree_thread(void *arg __unused);
 static void cbinfo_bmap_init(hammer2_bulkfree_info_t *cbinfo, size_t size);
 static int h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo,
@@ -501,12 +319,10 @@ hammer2_bulkfree_thread(void *arg)
 			hammer2_thr_signal2(thr, 0, HAMMER2_THREAD_REMASTER);
 			bzero(&bfi, sizeof(bfi));
 			bfi.size = 8192 * 1024;
-			/* hammer2_bulkfree_pass(thr->hmp, &bfi); */
 		}
 	}
 	thr->td = NULL;
 	hammer2_thr_signal(thr, HAMMER2_THREAD_STOPPED);
-	/* structure can go invalid at this point */
 }
 
 int
@@ -519,27 +335,12 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 	size_t size;
 	int error;
 
-	/*
-	 * We have to clear the live dedup cache as it might have entries
-	 * that are freeable as of now.  Any new entries in the dedup cache
-	 * made after this point, even if they become freeable, will have
-	 * previously been fully allocated and will be protected by the
-	 * 2-stage bulkfree.
-	 */
 	hammer2_dedup_clear(hmp);
 
-	/*
-	 * Setup for free pass using the buffer size specified by the
-	 * hammer2 utility, 32K-aligned.
-	 */
 	bzero(&cbinfo, sizeof(cbinfo));
 	size = (bfi->size + HAMMER2_FREEMAP_LEVELN_PSIZE - 1) &
 	       ~(size_t)(HAMMER2_FREEMAP_LEVELN_PSIZE - 1);
 
-	/*
-	 * Cap at 1/4 physical memory (hammer2 utility will not normally
-	 * ever specify a buffer this big, but leave the option available).
-	 */
 	if (size > kmem_lim_size() * 1024 * 1024 / 4) {
 		size = kmem_lim_size() * 1024 * 1024 / 4;
 		kprintf("hammer2: Warning: capping bulkfree buffer at %jdM\n",
@@ -549,17 +350,9 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 #define HAMMER2_FREEMAP_SIZEDIV	\
 	(HAMMER2_FREEMAP_LEVEL1_SIZE / HAMMER2_FREEMAP_LEVELN_PSIZE)
 
-	/*
-	 * Cap at the size needed to cover the whole volume to avoid
-	 * making an unnecessarily large allocation.
-	 */
 	if (size > hmp->total_size / HAMMER2_FREEMAP_SIZEDIV)
 		size = howmany(hmp->total_size, HAMMER2_FREEMAP_SIZEDIV);
 
-	/*
-	 * Minimum bitmap buffer size, then align to a LEVELN_PSIZE (32K)
-	 * boundary.
-	 */
 	if (size < 1024 * 1024)
 		size = 1024 * 1024;
 	size = (size + HAMMER2_FREEMAP_LEVELN_PSIZE - 1) &
@@ -573,10 +366,6 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 	kprintf("hammer2: bulkfree buf=%jdM\n",
 		(intmax_t)size / (1024 * 1024));
 
-	/*
-	 * Normalize start point to a 1GB boundary.  We operate on a
-	 * 32KB leaf bitmap boundary which represents 1GB of storage.
-	 */
 	cbinfo.sbase = bfi->sbase;
 	if (cbinfo.sbase > hmp->total_size)
 		cbinfo.sbase = hmp->total_size;
@@ -585,23 +374,8 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 
 	cbinfo.bulkfree_ticks = ticks;
 
-	/*
-	 * Loop on a full meta-data scan as many times as required to
-	 * get through all available storage.
-	 */
 	error = 0;
 	while (cbinfo.sbase < hmp->total_size) {
-		/*
-		 * We have enough ram to represent (incr) bytes of storage.
-		 * Each 32KB of ram represents 1GB of storage.
-		 *
-		 * We must also clean out our de-duplication heuristic for
-		 * each (incr) bytes of storage, otherwise we wind up not
-		 * scanning meta-data for later areas of storage because
-		 * they had already been scanned in earlier areas of storage.
-		 * Since the ranging is different, we have to restart
-		 * the dedup heuristic too.
-		 */
 		int allmedia;
 
 		cbinfo_bmap_init(&cbinfo, size);
@@ -633,19 +407,7 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 			kprintf("(%jdGB of media)\n",
 				(intmax_t)incr / (1024L*1024*1024));
 
-		/*
-		 * Scan topology for stuff inside this range.
-		 *
-		 * NOTE - By not using a transaction the operation can
-		 *	  run concurrent with the frontend as well as
-		 *	  with flushes.
-		 *
-		 *	  We cannot safely set a mtid without a transaction,
-		 *	  and in fact we don't want to set one anyway.  We
-		 *	  want the bulkfree to be passive and no interfere
-		 *	  with crash recovery.
-		 */
-#undef HAMMER2_BULKFREE_TRANS	/* undef - don't use transaction */
+#undef HAMMER2_BULKFREE_TRANS
 #ifdef HAMMER2_BULKFREE_TRANS
 		hammer2_trans_init(hmp->spmp, 0);
 		cbinfo.mtid = hammer2_trans_sub(hmp->spmp);
@@ -677,15 +439,6 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 		}
 		cbinfo.backout = NULL;
 
-		/*
-		 * If the complete scan succeeded we can synchronize our
-		 * in-memory freemap against live storage.  If an abort
-		 * occured we cannot safely synchronize our partially
-		 * filled-out in-memory freemap.
-		 *
-		 * We still synchronize on CHECK failures.  That is, we still
-		 * want bulkfree to operate even if the filesystem has defects.
-		 */
 		if (error & ~HAMMER2_ERROR_CHECK) {
 			kprintf("bulkfree lastdrop %d %d error=0x%04x\n",
 				vchain->refs, vchain->core.chain_count, error);
@@ -707,9 +460,6 @@ hammer2_bulkfree_pass(hammer2_dev_t *hmp, hammer2_chain_t *vchain,
 			hammer2_voldata_unlock(hmp);
 		}
 
-		/*
-		 * Cleanup for next loop.
-		 */
 #ifdef HAMMER2_BULKFREE_TRANS
 		hammer2_trans_done(hmp->spmp, 0);
 #endif
@@ -797,18 +547,9 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 	size_t bytes;
 	int radix;
 
-	/*
-	 * Check for signal and allow yield to userland during scan.
-	 */
 	if (hammer2_signal_check(&cbinfo->save_time))
 		return HAMMER2_ERROR_ABORTED;
 
-	/*
-	 * Deal with kernel thread cpu or I/O hogging by limiting the
-	 * number of chains scanned per second to hammer2_bulkfree_tps.
-	 * Ignore leaf records (DIRENT and DATA), no per-record I/O is
-	 * involved for those since we don't load their data.
-	 */
 	if (bref->type != HAMMER2_BREF_TYPE_DATA &&
 	    bref->type != HAMMER2_BREF_TYPE_DIRENT) {
 		++cbinfo->bulkfree_calls;
@@ -825,10 +566,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 		}
 	}
 
-	/*
-	 * Calculate the data offset and determine if it is within
-	 * the current freemap range being gathered.
-	 */
 	data_off = bref->data_off & ~HAMMER2_OFF_MASK_RADIX;
 	if (data_off < cbinfo->sbase || data_off >= cbinfo->sstop)
 		return 0;
@@ -837,13 +574,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 	if (data_off >= cbinfo->hmp->total_size)
 		return 0;
 
-	/*
-	 * Calculate the information needed to generate the in-memory
-	 * freemap record.
-	 *
-	 * Hammer2 does not allow allocations to cross the L1 (1GB) boundary,
-	 * it's a problem if it does.  (Or L0 (4MB) for that matter).
-	 */
 	radix = (int)(bref->data_off & HAMMER2_OFF_MASK_RADIX);
 	KKASSERT(radix != 0);
 	bytes = (size_t)1 << radix;
@@ -855,22 +585,12 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 			(intmax_t)bref->data_off,
 			(intmax_t)bref->key,
 			bref->keybits);
-		bytes = cbinfo->sstop - data_off;	/* XXX */
+		bytes = cbinfo->sstop - data_off;
 	}
 
-	/*
-	 * Convert to a storage offset relative to the beginning of the
-	 * storage range we are collecting.  Then lookup the level0 bmap entry.
-	 */
 	data_off -= cbinfo->sbase;
 	bmap = cbinfo->bmap + (data_off >> HAMMER2_FREEMAP_LEVEL0_RADIX);
 
-	/*
-	 * Convert data_off to a bmap-relative value (~4MB storage range).
-	 * Adjust linear, class, and avail.
-	 *
-	 * Hammer2 does not allow allocations to cross the L0 (4MB) boundary,
-	 */
 	data_off &= HAMMER2_FREEMAP_LEVEL0_MASK;
 	if (data_off + bytes > HAMMER2_FREEMAP_LEVEL0_SIZE) {
 		kprintf("hammer2_bulkfree_scan: illegal 4MB boundary "
@@ -886,14 +606,7 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 		bmap->avail = HAMMER2_FREEMAP_LEVEL0_SIZE;
 	}
 
-	/*
-	 * NOTE: bmap->class does not have to match class.  Classification
-	 *	 is relaxed when free space is low, so some mixing can occur.
-	 */
 #if 0
-	/*
-	 * XXX removed
-	 */
 	if (bmap->class != class) {
 		kprintf("hammer2_bulkfree_scan: illegal mixed class "
 			"%016jx %016jx/%d (%04x vs %04x)\n",
@@ -904,13 +617,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 	}
 #endif
 
-	/*
-	 * Just record the highest byte-granular offset for now.  Do not
-	 * match against allocations which are in multiples of whole blocks.
-	 *
-	 * Make sure that any in-block linear offset at least covers the
-	 * data range.  This can cause bmap->linear to become block-aligned.
-	 */
 	if (bytes & HAMMER2_FREEMAP_BLOCK_MASK) {
 		if (bmap->linear < (int32_t)data_off + (int32_t)bytes)
 			bmap->linear = (int32_t)data_off + (int32_t)bytes;
@@ -919,16 +625,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 		bmap->linear = (int32_t)data_off + (int32_t)bytes;
 	}
 
-	/*
-	 * Adjust the hammer2_bitmap_t bitmap[HAMMER2_BMAP_ELEMENTS].
-	 * 64-bit entries, 2 bits per entry, to code 11.
-	 *
-	 * NOTE: data_off mask to 524288, shift right by 14 (radix for 16384),
-	 *	 and multiply shift amount by 2 for sets of 2 bits.
-	 *
-	 * NOTE: The allocation can be smaller than HAMMER2_FREEMAP_BLOCK_SIZE.
-	 *	 also, data_off may not be FREEMAP_BLOCK_SIZE aligned.
-	 */
 	while (bytes > 0) {
 		hammer2_bitmap_t bmask;
 		int bindex;
@@ -939,11 +635,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 			((((int)data_off & HAMMER2_BMAP_INDEX_MASK) >>
 			 HAMMER2_FREEMAP_BLOCK_RADIX) << 1);
 
-		/*
-		 * NOTE! The (avail) calculation is bitmap-granular.  Multiple
-		 *	 sub-granular records can wind up at the same bitmap
-		 *	 position.
-		 */
 		if ((bmap->bitmapq[bindex] & bmask) == 0) {
 			if (bytes < HAMMER2_FREEMAP_BLOCK_SIZE) {
 				bmap->avail -= HAMMER2_FREEMAP_BLOCK_SIZE;
@@ -961,18 +652,6 @@ h2_bulkfree_callback(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref)
 	return 0;
 }
 
-/*
- * Synchronize the in-memory bitmap with the live freemap.  This is not a
- * direct copy.  Instead the bitmaps must be compared:
- *
- *	In-memory	Live-freemap
- *	   00		  11 -> 10	(do nothing if live modified)
- *			  10 -> 00	(do nothing if live modified)
- *	   11		  10 -> 11	handles race against live
- *			  ** -> 11	nominally warn of corruption
- *
- * We must also fixup the hints in HAMMER2_BREF_TYPE_FREEMAP_LEAF.
- */
 static int
 h2_bulkfree_sync(hammer2_bulkfree_info_t *cbinfo)
 {
@@ -1011,24 +690,13 @@ h2_bulkfree_sync(hammer2_bulkfree_info_t *cbinfo)
 	live_chain = NULL;
 	error = 0;
 
-	/*
-	 * Iterate each hammer2_bmap_data_t line (128 bytes) managing
-	 * 4MB of storage.
-	 */
 	while (data_off < cbinfo->sstop) {
-		/*
-		 * The freemap is not used below allocator_beg or beyond
-		 * total_size.
-		 */
 
 		if (data_off < cbinfo->hmp->voldata.allocator_beg)
 			goto next;
 		if (data_off >= cbinfo->hmp->total_size)
 			goto next;
 
-		/*
-		 * Locate the freemap leaf on the live filesystem
-		 */
 		key = (data_off & ~HAMMER2_FREEMAP_LEVEL1_MASK);
 
 		if (live_chain == NULL || live_chain->bref.key != key) {
@@ -1052,11 +720,6 @@ h2_bulkfree_sync(hammer2_bulkfree_info_t *cbinfo)
 			}
 		}
 		if (live_chain == NULL) {
-			/*
-			 * XXX if we implement a full recovery mode we need
-			 * to create/recreate missing freemap chains if our
-			 * bmap has any allocated blocks.
-			 */
 			if (bmap->class &&
 			    bmap->avail != HAMMER2_FREEMAP_LEVEL0_SIZE) {
 				kprintf("hammer2_bulkfree: cannot locate "
@@ -1081,19 +744,6 @@ h2_bulkfree_sync(hammer2_bulkfree_info_t *cbinfo)
 			    HAMMER2_FREEMAP_LEVEL0_RADIX;
 		live = &live_chain->data->bmdata[bmapindex];
 
-		/*
-		 * Shortcut if the bitmaps match and the live linear
-		 * indicator is sane.  We can't do a perfect check of
-		 * live->linear because the only real requirement is that
-		 * if it is not block-aligned, that it not cover the space
-		 * within its current block which overlaps one of the data
-		 * ranges we scan.  We don't retain enough fine-grained
-		 * data in our scan to be able to set it exactly.
-		 *
-		 * TODO - we could shortcut this by testing that both
-		 * live->class and bmap->class are 0, and both avails are
-		 * set to HAMMER2_FREEMAP_LEVEL0_SIZE (4MB).
-		 */
 		if (bcmp(live->bitmapq, bmap->bitmapq,
 			 sizeof(bmap->bitmapq)) == 0 &&
 		    live->linear >= bmap->linear &&
@@ -1123,7 +773,7 @@ h2_bulkfree_sync(hammer2_bulkfree_info_t *cbinfo)
 			goto next;
 		}
 		live_chain->bref.check.freemap.bigmask = -1;
-		cbinfo->hmp->freemap_relaxed = 0;	/* reset heuristic */
+		cbinfo->hmp->freemap_relaxed = 0;
 		live = &live_chain->data->bmdata[bmapindex];
 
 		h2_bulkfree_sync_adjust(cbinfo, data_off, live, bmap,
@@ -1145,9 +795,6 @@ next:
 	return error;
 }
 
-/*
- * Merge the bulkfree bitmap against the existing bitmap.
- */
 static
 void
 h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
@@ -1163,8 +810,8 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 	tmp_off = data_off;
 
 	for (bindex = 0; bindex < HAMMER2_BMAP_ELEMENTS; ++bindex) {
-		lmask = live->bitmapq[bindex];	/* live */
-		mmask = bmap->bitmapq[bindex];	/* snapshotted bulkfree */
+		lmask = live->bitmapq[bindex];
+		mmask = bmap->bitmapq[bindex];
 		if (lmask == mmask) {
 			tmp_off += HAMMER2_BMAP_INDEX_SIZE;
 			continue;
@@ -1174,22 +821,14 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 		     scount < HAMMER2_BMAP_BITS_PER_ELEMENT;
 		     scount += 2) {
 			if ((mmask & 3) == 0) {
-				/*
-				 * in-memory 00		live 11 -> 10
-				 *			live 10 -> 00
-				 *
-				 * Storage might be marked allocated or
-				 * staged and must be remarked staged or
-				 * free.
-				 */
 				switch (lmask & 3) {
-				case 0:	/* 00 */
+				case 0:
 					break;
-				case 1:	/* 01 */
+				case 1:
 					kprintf("hammer2_bulkfree: cannot "
 						"transition m=00/l=01\n");
 					break;
-				case 2:	/* 10 -> 00 */
+				case 2:
 					live->bitmapq[bindex] &=
 					    ~((hammer2_bitmap_t)2 << scount);
 					live->avail +=
@@ -1208,7 +847,7 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 						HAMMER2_FREEMAP_BLOCK_RADIX,
 						HAMMER2_FREEMAP_BLOCK_SIZE);
 					break;
-				case 3:	/* 11 -> 10 */
+				case 3:
 					live->bitmapq[bindex] &=
 					    ~((hammer2_bitmap_t)1 << scount);
 					++cbinfo->count_11_10;
@@ -1221,23 +860,8 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 					break;
 				}
 			} else if ((mmask & 3) == 3) {
-				/*
-				 * in-memory 11		live 10 -> 11
-				 *			live ** -> 11
-				 *
-				 * Storage might be incorrectly marked free
-				 * or staged and must be remarked fully
-				 * allocated.
-				 */
 				switch (lmask & 3) {
-				case 0:	/* 00 */
-					/*
-					 * This case is not supposed to
-					 * happen.  If it does, it means
-					 * that an allocated block was
-					 * thought by the filesystem to be
-					 * free.
-					 */
+				case 0:
 					kprintf("hammer2_bulkfree: "
 						"00->11 critical freemap "
 						"transition for datablock "
@@ -1251,13 +875,13 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 					if ((int32_t)live->avail < 0)
 						live->avail = 0;
 					break;
-				case 1:	/* 01 */
+				case 1:
 					++cbinfo->count_01_11;
 					break;
-				case 2:	/* 10 -> 11 */
+				case 2:
 					++cbinfo->count_10_11;
 					break;
-				case 3:	/* 11 */
+				case 3:
 					break;
 				}
 				live->bitmapq[bindex] |=
@@ -1269,19 +893,11 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 		}
 	}
 
-	/*
-	 * Determine if the live bitmap is completely free and reset its
-	 * fields if so.  Otherwise check to see if we can reduce the linear
-	 * offset.
-	 */
 	for (bindex = HAMMER2_BMAP_ELEMENTS - 1; bindex >= 0; --bindex) {
 		if (live->bitmapq[bindex] != 0)
 			break;
 	}
 	if (bindex < 0) {
-		/*
-		 * Completely empty, reset entire segment
-		 */
 #if 0
 		kprintf("hammer2: cleanseg %016jx.%04x (%d)\n",
 			alloc_base, live->class, live->avail);
@@ -1291,46 +907,18 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 		live->linear = 0;
 		++cbinfo->count_l0cleans;
 	} else if (bindex < 7) {
-		/*
-		 * Partially full, bitmapq[bindex] != 0.  Our bulkfree pass
-		 * does not record enough information to set live->linear
-		 * exactly.
-		 *
-		 * NOTE: Setting live->linear to a sub-block (16K) boundary
-		 *	 forces the live code to iterate to the next fully
-		 *	 free block.  It does NOT mean that all blocks above
-		 *	 live->linear are available.
-		 *
-		 *	 Setting live->linear to a fragmentary (less than
-		 *	 16K) boundary allows allocations to iterate within
-		 *	 that sub-block.
-		 */
 		if (live->linear < bmap->linear &&
 		    ((live->linear ^ bmap->linear) &
 		     ~HAMMER2_FREEMAP_BLOCK_MASK) == 0) {
-			/*
-			 * If greater than but still within the same
-			 * sub-block as live we can adjust linear upward.
-			 */
 			live->linear = bmap->linear;
 			++cbinfo->count_linadjusts;
 		} else {
-			/*
-			 * Otherwise adjust to the nearest higher or same
-			 * sub-block boundary.  The live system may have
-			 * bounced live->linear around so we cannot make any
-			 * assumptions with regards to available fragmentary
-			 * allocations.
-			 */
 			live->linear =
 				(bmap->linear + HAMMER2_FREEMAP_BLOCK_MASK) &
 				~HAMMER2_FREEMAP_BLOCK_MASK;
 			++cbinfo->count_linadjusts;
 		}
 	} else {
-		/*
-		 * Completely full, effectively disable the linear iterator
-		 */
 		live->linear = HAMMER2_SEGSIZE;
 	}
 
@@ -1352,12 +940,6 @@ h2_bulkfree_sync_adjust(hammer2_bulkfree_info_t *cbinfo,
 #endif
 }
 
-/*
- * BULKFREE DEDUP HEURISTIC
- *
- * WARNING! This code is SMP safe but the heuristic allows SMP collisions.
- *	    All fields must be loaded into locals and validated.
- */
 static
 int
 h2_bulkfree_test(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref,
@@ -1389,15 +971,10 @@ h2_bulkfree_test(hammer2_bulkfree_info_t *cbinfo, hammer2_blockref_t *bref,
 	return 0;
 }
 
-/*
- * Calculate what the bigmask should be.  bigmask is permissive, so the
- * bits returned must be set at a minimum in the live bigmask.  Other bits
- * might also be set in the live bigmask.
- */
 static uint32_t
 bigmask_get(hammer2_bmap_data_t *bmap)
 {
-	hammer2_bitmap_t mask;	/* 64-bit mask to check */
+	hammer2_bitmap_t mask;
 	hammer2_bitmap_t scan;
 	uint32_t bigmask;
 	uint32_t radix_mask;
@@ -1411,7 +988,7 @@ bigmask_get(hammer2_bmap_data_t *bmap)
 
 		radix_mask = 1U << HAMMER2_FREEMAP_BLOCK_RADIX;
 		radix_mask |= radix_mask - 1;
-		iter = 2;	/* each bitmap entry is 2 bits. 2, 4, 8... */
+		iter = 2;
 		while (iter <= HAMMER2_BMAP_BITS_PER_ELEMENT) {
 			if (iter == HAMMER2_BMAP_BITS_PER_ELEMENT)
 				scan = -1;
@@ -1419,11 +996,6 @@ bigmask_get(hammer2_bmap_data_t *bmap)
 				scan = (1LU << iter) - 1;
 			j = 0;
 			while (j < HAMMER2_BMAP_BITS_PER_ELEMENT) {
-				/*
-				 * Check if all bits are 0 (free block).
-				 * If so, set the bit in bigmask for the
-				 * allocation radix under test.
-				 */
 				if ((scan & mask) == 0) {
 					bigmask |= radix_mask;
 				}

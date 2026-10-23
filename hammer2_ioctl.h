@@ -1,38 +1,3 @@
-/*
- * Copyright (c) 2011-2020 The DragonFly Project.  All rights reserved.
- *
- * This code is derived from software contributed to The DragonFly Project
- * by Matthew Dillon <dillon@dragonflybsd.org>
- * by Venkatesh Srinivas <vsrinivas@dragonflybsd.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of The DragonFly Project nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific, prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
- * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
-
 #ifndef _VFS_HAMMER2_IOCTL_H_
 #define _VFS_HAMMER2_IOCTL_H_
 
@@ -49,9 +14,6 @@
 #include "hammer2_mount.h"
 #endif
 
-/*
- * get_version
- */
 struct hammer2_ioc_version {
 	int			version;
 	char			reserved[256 - 4];
@@ -66,50 +28,36 @@ struct hammer2_ioc_recluster {
 
 typedef struct hammer2_ioc_recluster hammer2_ioc_recluster_t;
 
-/*
- * Ioctls to manage the volume->copyinfo[] array and to associate or
- * disassociate sockets
- */
 struct hammer2_ioc_remote {
 	int			copyid;
-	int			nextid;	/* for iteration (get only) */
-	int			fd;	/* socket descriptor if applicable */
+	int			nextid;
+	int			fd;
 	int			reserved03;
 	int			reserved04[8];
-	hammer2_volconf_t	copy1;	/* copy spec */
-	hammer2_volconf_t	copy2;	/* copy spec (rename ops only) */
+	hammer2_volconf_t	copy1;
+	hammer2_volconf_t	copy2;
 };
 
 typedef struct hammer2_ioc_remote hammer2_ioc_remote_t;
 
-/*
- * Ioctls to manage PFSs
- *
- * PFSs can be clustered by matching their pfs_clid, and the PFSs making up
- * a cluster can be uniquely identified by combining the vol_id with
- * the pfs_clid.
- */
 struct hammer2_ioc_pfs {
-	hammer2_key_t		name_key;	/* super-root directory scan */
-	hammer2_key_t		name_next;	/* (GET only) */
-	uint8_t			pfs_type;	/* e.g. MASTER, SLAVE, ... */
-	uint8_t			pfs_subtype;	/* e.g. SNAPSHOT */
+	hammer2_key_t		name_key;
+	hammer2_key_t		name_next;
+	uint8_t			pfs_type;
+	uint8_t			pfs_subtype;
 	uint8_t			reserved0012;
 	uint8_t			reserved0013;
 	uint32_t		pfs_flags;
 	uint64_t		reserved0018;
-	uuid_t			pfs_fsid;	/* identifies PFS instance */
-	uuid_t			pfs_clid;	/* identifies PFS cluster */
-	char			name[NAME_MAX+1]; /* PFS label */
+	uuid_t			pfs_fsid;
+	uuid_t			pfs_clid;
+	char			name[NAME_MAX+1];
 };
 
 typedef struct hammer2_ioc_pfs hammer2_ioc_pfs_t;
 
 #define HAMMER2_PFSFLAGS_NOSYNC		0x00000001
 
-/*
- * Ioctls to manage inodes
- */
 struct hammer2_ioc_inode {
 	uint32_t		flags;
 	void			*unused;
@@ -126,25 +74,19 @@ typedef struct hammer2_ioc_inode hammer2_ioc_inode_t;
 #define HAMMER2IOC_INODE_FLAG_CHECK	0x00000008
 #define HAMMER2IOC_INODE_FLAG_COMP	0x00000010
 
-/*
- * Ioctl for bulkfree scan
- */
 struct hammer2_ioc_bulkfree {
-	hammer2_off_t		sbase;	/* starting storage offset */
-	hammer2_off_t		sstop;	/* (set on return) */
-	size_t			size;	/* swapable kernel memory to use */
-	hammer2_off_t		count_allocated;  /* alloc fixups this run */
-	hammer2_off_t		count_freed;	  /* bytes freed this run */
-	hammer2_off_t		total_fragmented; /* merged result */
-	hammer2_off_t		total_allocated;  /* merged result */
-	hammer2_off_t		total_scanned;	  /* bytes of storage */
+	hammer2_off_t		sbase;
+	hammer2_off_t		sstop;
+	size_t			size;
+	hammer2_off_t		count_allocated;
+	hammer2_off_t		count_freed;
+	hammer2_off_t		total_fragmented;
+	hammer2_off_t		total_allocated;
+	hammer2_off_t		total_scanned;
 };
 
 typedef struct hammer2_ioc_bulkfree hammer2_ioc_bulkfree_t;
 
-/*
- * Unconditionally delete a hammer2 directory entry or inode number
- */
 struct hammer2_ioc_destroy {
 	enum { HAMMER2_DELETE_NOP,
 	       HAMMER2_DELETE_FILE,
@@ -155,11 +97,6 @@ struct hammer2_ioc_destroy {
 
 typedef struct hammer2_ioc_destroy hammer2_ioc_destroy_t;
 
-/*
- * Grow the filesystem.  If size is set to 0 H2 will auto-size to the
- * partition it is in.  The caller can resize the partition, then issue
- * the ioctl.
- */
 struct hammer2_ioc_growfs {
 	hammer2_off_t		size;
 	int			modified;
@@ -169,9 +106,6 @@ struct hammer2_ioc_growfs {
 
 typedef struct hammer2_ioc_growfs hammer2_ioc_growfs_t;
 
-/*
- * Ioctls to manage volumes
- */
 struct hammer2_ioc_volume {
 	char			path[MAXPATHLEN];
 	int			id;
@@ -189,10 +123,6 @@ struct hammer2_ioc_volume_list {
 };
 
 typedef struct hammer2_ioc_volume_list hammer2_ioc_volume_list_t;
-
-/*
- * Ioctl list
- */
 
 #define HAMMER2IOC_VERSION_GET	_IOWR('h', 64, struct hammer2_ioc_version)
 #define HAMMER2IOC_RECLUSTER	_IOWR('h', 65, struct hammer2_ioc_recluster)
@@ -214,12 +144,6 @@ typedef struct hammer2_ioc_volume_list hammer2_ioc_volume_list_t;
 #define HAMMER2IOC_INODE_GET	_IOWR('h', 86, struct hammer2_ioc_inode)
 #define HAMMER2IOC_INODE_SET	_IOWR('h', 87, struct hammer2_ioc_inode)
 
-/*
- * 88, 89, 90 - old copmression ioctls, now reserved
- *
- * 94 - note that this deletes a directory entry or inode number
- *	unconditionally.
- */
 #define HAMMER2IOC_DEBUG_DUMP	_IOWR('h', 91, int)
 #define HAMMER2IOC_BULKFREE_SCAN _IOWR('h', 92, struct hammer2_ioc_bulkfree)
 #define HAMMER2IOC_BULKFREE_ASYNC _IOWR('h', 93, struct hammer2_ioc_bulkfree)
@@ -228,4 +152,4 @@ typedef struct hammer2_ioc_volume_list hammer2_ioc_volume_list_t;
 #define HAMMER2IOC_GROWFS	_IOWR('h', 96, struct hammer2_ioc_growfs)
 #define HAMMER2IOC_VOLUME_LIST	_IOWR('h', 97, struct hammer2_ioc_volume_list)
 
-#endif /* !_VFS_HAMMER2_IOCTL_H_ */
+#endif

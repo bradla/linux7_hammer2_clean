@@ -1,55 +1,4 @@
-/*
-*  xxHash - Fast Hash algorithm
-*  Copyright (C) 2012-2016, Yann Collet
-*
-*  BSD 2-Clause License (http://www.opensource.org/licenses/bsd-license.php)
-*
-*  Redistribution and use in source and binary forms, with or without
-*  modification, are permitted provided that the following conditions are
-*  met:
-*
-*  * Redistributions of source code must retain the above copyright
-*  notice, this list of conditions and the following disclaimer.
-*  * Redistributions in binary form must reproduce the above
-*  copyright notice, this list of conditions and the following disclaimer
-*  in the documentation and/or other materials provided with the
-*  distribution.
-*
-*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-*  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-*  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-*  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-*  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-*  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-*  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-*  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-*  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*
-*  You can contact the author at :
-*  - xxHash homepage: http://www.xxhash.com
-*  - xxHash source repository : https://github.com/Cyan4973/xxHash
-*/
-
-
-/* *************************************
-*  Tuning parameters
-***************************************/
-/*!XXH_FORCE_MEMORY_ACCESS :
- * By default, access to unaligned memory is controlled by `memcpy()`, which is safe and portable.
- * Unfortunately, on some target/compiler combinations, the generated assembly is sub-optimal.
- * The below switch allow to select different access method for improved performance.
- * Method 0 (default) : use `memcpy()`. Safe and portable.
- * Method 1 : `__packed` statement. It depends on compiler extension (ie, not portable).
- *            This method is safe if your compiler supports it, and *generally* as fast or faster than `memcpy`.
- * Method 2 : direct access. This method doesn't depend on compiler but violate C standard.
- *            It can generate buggy code on targets which do not support unaligned memory accesses.
- *            But in some circumstances, it's the only known way to get the most performance (ie GCC + ARMv6)
- * See http://stackoverflow.com/a/32095106/646947 for details.
- * Prefer these methods in priority order (0 > 1 > 2)
- */
-#ifndef XXH_FORCE_MEMORY_ACCESS   /* can be defined externally, on command line for example */
+#ifndef XXH_FORCE_MEMORY_ACCESS
 #  if defined(__GNUC__) && ( defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6ZK__) || defined(__ARM_ARCH_6T2__) )
 #    define XXH_FORCE_MEMORY_ACCESS 2
 #  elif defined(__INTEL_COMPILER) || \
@@ -58,32 +7,11 @@
 #  endif
 #endif
 
-/*!XXH_ACCEPT_NULL_INPUT_POINTER :
- * If the input pointer is a null pointer, xxHash default behavior is to trigger a memory access error, since it is a bad pointer.
- * When this option is enabled, xxHash output for null input pointers will be the same as a null-length input.
- * By default, this option is disabled. To enable it, uncomment below define :
- */
-/* #define XXH_ACCEPT_NULL_INPUT_POINTER 1 */
-
-/*!XXH_FORCE_NATIVE_FORMAT :
- * By default, xxHash library provides endian-independant Hash values, based on little-endian convention.
- * Results are therefore identical for little-endian and big-endian CPU.
- * This comes at a performance cost for big-endian CPU, since some swapping is required to emulate little-endian format.
- * Should endian-independance be of no importance for your application, you may set the #define below to 1,
- * to improve speed for Big-endian CPU.
- * This option has no impact on Little_Endian CPU.
- */
-#ifndef XXH_FORCE_NATIVE_FORMAT   /* can be defined externally */
+#ifndef XXH_FORCE_NATIVE_FORMAT
 #  define XXH_FORCE_NATIVE_FORMAT 0
 #endif
 
-/*!XXH_FORCE_ALIGN_CHECK :
- * This is a minor performance trick, only useful with lots of very small keys.
- * It means : check for aligned/unaligned input.
- * The check costs one initial branch per hash; set to 0 when the input data
- * is guaranteed to be aligned.
- */
-#ifndef XXH_FORCE_ALIGN_CHECK /* can be defined externally */
+#ifndef XXH_FORCE_ALIGN_CHECK
 #  if defined(__i386) || defined(_M_IX86) || defined(__x86_64__) || defined(_M_X64)
 #    define XXH_FORCE_ALIGN_CHECK 0
 #  else
@@ -96,15 +24,9 @@
 #include <sys/systm.h>
 #else
 
-/* *************************************
-*  Includes & Memory related functions
-***************************************/
-/* Modify the local functions below should you wish to use some other memory routines */
-/* for malloc(), free() */
 #include <stdlib.h>
 static void* XXH_malloc(size_t s) { return malloc(s); }
 static void  XXH_free  (void* p)  { free(p); }
-/* for memcpy() */
 #include <string.h>
 #endif
 
@@ -113,15 +35,11 @@ static void* XXH_memcpy(void* dest, const void* src, size_t size) { return memcp
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash.h"
 
-
-/* *************************************
-*  Compiler Specific Options
-***************************************/
-#ifdef _MSC_VER    /* Visual Studio */
-#  pragma warning(disable : 4127)      /* disable: C4127: conditional expression is constant */
+#ifdef _MSC_VER
+#  pragma warning(disable : 4127)
 #  define FORCE_INLINE static __forceinline
 #else
-#  if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L   /* C99 */
+#  if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 #    ifdef __GNUC__
 #      define FORCE_INLINE static inline __attribute__((always_inline))
 #    else
@@ -129,16 +47,12 @@ static void* XXH_memcpy(void* dest, const void* src, size_t size) { return memcp
 #    endif
 #  else
 #    define FORCE_INLINE static
-#  endif /* __STDC_VERSION__ */
+#  endif
 #endif
 
-
-/* *************************************
-*  Basic Types
-***************************************/
 #ifndef MEM_MODULE
 # define MEM_MODULE
-# if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L   /* C99 */
+# if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
 #   include <sys/stdint.h>
     typedef uint8_t  BYTE;
     typedef uint16_t U16;
@@ -154,27 +68,19 @@ static void* XXH_memcpy(void* dest, const void* src, size_t size) { return memcp
 #  endif
 #endif
 
-
 #if (defined(XXH_FORCE_MEMORY_ACCESS) && (XXH_FORCE_MEMORY_ACCESS==2))
 
-/* Force direct memory access. Only works on CPU which support unaligned memory access in hardware */
 static U32 XXH_read32(const void* memPtr) { return *(const U32*) memPtr; }
 static U64 XXH_read64(const void* memPtr) { return *(const U64*) memPtr; }
 
 #elif (defined(XXH_FORCE_MEMORY_ACCESS) && (XXH_FORCE_MEMORY_ACCESS==1))
 
-/* __pack instructions are safer, but compiler specific, hence potentially problematic for some compilers */
-/* currently only defined for gcc and icc */
 typedef union { U32 u32; U64 u64; } __attribute__((packed)) unalign;
 
 static U32 XXH_read32(const void* ptr) { return ((const unalign*)ptr)->u32; }
 static U64 XXH_read64(const void* ptr) { return ((const unalign*)ptr)->u64; }
 
 #else
-
-/* portable and safe solution. Generally efficient.
- * see : http://stackoverflow.com/a/32095106/646947
- */
 
 static U32 XXH_read32(const void* memPtr)
 {
@@ -190,15 +96,10 @@ static U64 XXH_read64(const void* memPtr)
     return val;
 }
 
-#endif   /* XXH_FORCE_DIRECT_MEMORY_ACCESS */
+#endif
 
-
-/* ****************************************
-*  Compiler-specific Functions and Macros
-******************************************/
 #define GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__)
 
-/* Note : although _rotl exists for minGW (GCC under windows), performance seems poor */
 #if defined(_MSC_VER)
 #  define XXH_rotl32(x,r) _rotl(x,r)
 #  define XXH_rotl64(x,r) _rotl64(x,r)
@@ -207,7 +108,7 @@ static U64 XXH_read64(const void* memPtr)
 #  define XXH_rotl64(x,r) ((x << r) | (x >> (64 - r)))
 #endif
 
-#if defined(_MSC_VER)     /* Visual Studio */
+#if defined(_MSC_VER)
 #  define XXH_swap32 _byteswap_ulong
 #  define XXH_swap64 _byteswap_uint64
 #elif GCC_VERSION >= 403
@@ -234,22 +135,13 @@ static U64 XXH_swap64 (U64 x)
 }
 #endif
 
-
-/* *************************************
-*  Architecture Macros
-***************************************/
 typedef enum { XXH_bigEndian=0, XXH_littleEndian=1 } XXH_endianess;
 
-/* XXH_CPU_LITTLE_ENDIAN can be defined externally, for example on the compiler command line */
 #ifndef XXH_CPU_LITTLE_ENDIAN
     static const int g_one = 1;
 #   define XXH_CPU_LITTLE_ENDIAN   (*(const char*)(&g_one))
 #endif
 
-
-/* ***************************
-*  Memory reads
-*****************************/
 typedef enum { XXH_aligned, XXH_unaligned } XXH_alignment;
 
 FORCE_INLINE U32 XXH_readLE32_align(const void* ptr, XXH_endianess endian, XXH_alignment align)
@@ -288,16 +180,8 @@ static U64 XXH_readBE64(const void* ptr)
     return XXH_CPU_LITTLE_ENDIAN ? XXH_swap64(XXH_read64(ptr)) : XXH_read64(ptr);
 }
 
+#define XXH_STATIC_ASSERT(c)   { enum { XXH_static_assert = 1/(int)(!!(c)) }; }
 
-/* *************************************
-*  Macros
-***************************************/
-#define XXH_STATIC_ASSERT(c)   { enum { XXH_static_assert = 1/(int)(!!(c)) }; }    /* use only *after* variable declarations */
-
-
-/* *************************************
-*  Constants
-***************************************/
 static const U32 PRIME32_1 = 2654435761U;
 static const U32 PRIME32_2 = 2246822519U;
 static const U32 PRIME32_3 = 3266489917U;
@@ -311,11 +195,6 @@ static const U64 PRIME64_4 =  9650029242287828579ULL;
 static const U64 PRIME64_5 =  2870177450012600261ULL;
 
 XXH_PUBLIC_API unsigned XXH_versionNumber (void) { return XXH_VERSION_NUMBER; }
-
-
-/* ***************************
-*  Simple Hash Functions
-*****************************/
 
 static U32 XXH32_round(U32 seed, U32 input)
 {
@@ -381,11 +260,9 @@ FORCE_INLINE U32 XXH32_endian_align(const void* input, size_t len, U32 seed, XXH
     return h32;
 }
 
-
 XXH_PUBLIC_API unsigned int XXH32 (const void* input, size_t len, unsigned int seed)
 {
 #if 0
-    /* Simple version, good for code maintenance, but unfortunately slow for small inputs */
     XXH32_CREATESTATE_STATIC(state);
     XXH32_reset(state, seed);
     XXH32_update(state, input, len);
@@ -394,7 +271,7 @@ XXH_PUBLIC_API unsigned int XXH32 (const void* input, size_t len, unsigned int s
     XXH_endianess endian_detected = (XXH_endianess)XXH_CPU_LITTLE_ENDIAN;
 
     if (XXH_FORCE_ALIGN_CHECK) {
-        if ((((size_t)input) & 3) == 0) {   /* Input is 4-bytes aligned, leverage the speed benefit */
+        if ((((size_t)input) & 3) == 0) {
             if ((endian_detected==XXH_littleEndian) || XXH_FORCE_NATIVE_FORMAT)
                 return XXH32_endian_align(input, len, seed, XXH_littleEndian, XXH_aligned);
             else
@@ -407,7 +284,6 @@ XXH_PUBLIC_API unsigned int XXH32 (const void* input, size_t len, unsigned int s
         return XXH32_endian_align(input, len, seed, XXH_bigEndian, XXH_unaligned);
 #endif
 }
-
 
 static U64 XXH64_round(U64 acc, U64 input)
 {
@@ -493,11 +369,9 @@ FORCE_INLINE U64 XXH64_endian_align(const void* input, size_t len, U64 seed, XXH
     return h64;
 }
 
-
 XXH_PUBLIC_API unsigned long long XXH64 (const void* input, size_t len, unsigned long long seed)
 {
 #if 0
-    /* Simple version, good for code maintenance, but unfortunately slow for small inputs */
     XXH64_CREATESTATE_STATIC(state);
     XXH64_reset(state, seed);
     XXH64_update(state, input, len);
@@ -506,7 +380,7 @@ XXH_PUBLIC_API unsigned long long XXH64 (const void* input, size_t len, unsigned
     XXH_endianess endian_detected = (XXH_endianess)XXH_CPU_LITTLE_ENDIAN;
 
     if (XXH_FORCE_ALIGN_CHECK) {
-        if ((((size_t)input) & 7)==0) {  /* Input is aligned, let's leverage the speed advantage */
+        if ((((size_t)input) & 7)==0) {
             if ((endian_detected==XXH_littleEndian) || XXH_FORCE_NATIVE_FORMAT)
                 return XXH64_endian_align(input, len, seed, XXH_littleEndian, XXH_aligned);
             else
@@ -519,11 +393,6 @@ XXH_PUBLIC_API unsigned long long XXH64 (const void* input, size_t len, unsigned
         return XXH64_endian_align(input, len, seed, XXH_bigEndian, XXH_unaligned);
 #endif
 }
-
-
-/* **************************************************
-*  Advanced Hash Functions
-****************************************************/
 
 #if !defined(_KERNEL)
 
@@ -549,11 +418,9 @@ XXH_PUBLIC_API XXH_errorcode XXH64_freeState(XXH64_state_t* statePtr)
 
 #endif
 
-/*** Hash feed ***/
-
 XXH_PUBLIC_API XXH_errorcode XXH32_reset(XXH32_state_t* statePtr, unsigned int seed)
 {
-    XXH32_state_t state;   /* using a local state to memcpy() in order to avoid strict-aliasing warnings */
+    XXH32_state_t state;
     memset(&state, 0, sizeof(state));
     state.seed = seed;
     state.v1 = seed + PRIME32_1 + PRIME32_2;
@@ -564,10 +431,9 @@ XXH_PUBLIC_API XXH_errorcode XXH32_reset(XXH32_state_t* statePtr, unsigned int s
     return XXH_OK;
 }
 
-
 XXH_PUBLIC_API XXH_errorcode XXH64_reset(XXH64_state_t* statePtr, unsigned long long seed)
 {
-    XXH64_state_t state;   /* using a local state to memcpy() in order to avoid strict-aliasing warnings */
+    XXH64_state_t state;
     memset(&state, 0, sizeof(state));
     state.seed = seed;
     state.v1 = seed + PRIME64_1 + PRIME64_2;
@@ -577,7 +443,6 @@ XXH_PUBLIC_API XXH_errorcode XXH64_reset(XXH64_state_t* statePtr, unsigned long 
     memcpy(statePtr, &state, sizeof(state));
     return XXH_OK;
 }
-
 
 FORCE_INLINE XXH_errorcode XXH32_update_endian (XXH32_state_t* state, const void* input, size_t len, XXH_endianess endian)
 {
@@ -590,13 +455,13 @@ FORCE_INLINE XXH_errorcode XXH32_update_endian (XXH32_state_t* state, const void
 
     state->total_len += len;
 
-    if (state->memsize + len < 16)  {   /* fill in tmp buffer */
+    if (state->memsize + len < 16)  {
         XXH_memcpy((BYTE*)(state->mem32) + state->memsize, input, len);
         state->memsize += (U32)len;
         return XXH_OK;
     }
 
-    if (state->memsize) {   /* some data left from previous update */
+    if (state->memsize) {
         XXH_memcpy((BYTE*)(state->mem32) + state->memsize, input, 16-state->memsize);
         {   const U32* p32 = state->mem32;
             state->v1 = XXH32_round(state->v1, XXH_readLE32(p32, endian)); p32++;
@@ -646,8 +511,6 @@ XXH_PUBLIC_API XXH_errorcode XXH32_update (XXH32_state_t* state_in, const void* 
         return XXH32_update_endian(state_in, input, len, XXH_bigEndian);
 }
 
-
-
 FORCE_INLINE U32 XXH32_digest_endian (const XXH32_state_t* state, XXH_endianess endian)
 {
     const BYTE * p = (const BYTE*)state->mem32;
@@ -683,7 +546,6 @@ FORCE_INLINE U32 XXH32_digest_endian (const XXH32_state_t* state, XXH_endianess 
     return h32;
 }
 
-
 XXH_PUBLIC_API unsigned int XXH32_digest (const XXH32_state_t* state_in)
 {
     XXH_endianess endian_detected = (XXH_endianess)XXH_CPU_LITTLE_ENDIAN;
@@ -693,10 +555,6 @@ XXH_PUBLIC_API unsigned int XXH32_digest (const XXH32_state_t* state_in)
     else
         return XXH32_digest_endian(state_in, XXH_bigEndian);
 }
-
-
-
-/* **** XXH64 **** */
 
 FORCE_INLINE XXH_errorcode XXH64_update_endian (XXH64_state_t* state, const void* input, size_t len, XXH_endianess endian)
 {
@@ -709,13 +567,13 @@ FORCE_INLINE XXH_errorcode XXH64_update_endian (XXH64_state_t* state, const void
 
     state->total_len += len;
 
-    if (state->memsize + len < 32) {  /* fill in tmp buffer */
+    if (state->memsize + len < 32) {
         XXH_memcpy(((BYTE*)state->mem64) + state->memsize, input, len);
         state->memsize += (U32)len;
         return XXH_OK;
     }
 
-    if (state->memsize) {   /* tmp buffer is full */
+    if (state->memsize) {
         XXH_memcpy(((BYTE*)state->mem64) + state->memsize, input, 32-state->memsize);
         state->v1 = XXH64_round(state->v1, XXH_readLE64(state->mem64+0, endian));
         state->v2 = XXH64_round(state->v2, XXH_readLE64(state->mem64+1, endian));
@@ -762,8 +620,6 @@ XXH_PUBLIC_API XXH_errorcode XXH64_update (XXH64_state_t* state_in, const void* 
     else
         return XXH64_update_endian(state_in, input, len, XXH_bigEndian);
 }
-
-
 
 FORCE_INLINE U64 XXH64_digest_endian (const XXH64_state_t* state, XXH_endianess endian)
 {
@@ -816,7 +672,6 @@ FORCE_INLINE U64 XXH64_digest_endian (const XXH64_state_t* state, XXH_endianess 
     return h64;
 }
 
-
 XXH_PUBLIC_API unsigned long long XXH64_digest (const XXH64_state_t* state_in)
 {
     XXH_endianess endian_detected = (XXH_endianess)XXH_CPU_LITTLE_ENDIAN;
@@ -826,17 +681,6 @@ XXH_PUBLIC_API unsigned long long XXH64_digest (const XXH64_state_t* state_in)
     else
         return XXH64_digest_endian(state_in, XXH_bigEndian);
 }
-
-
-/* **************************
-*  Canonical representation
-****************************/
-
-/*! Default XXH result types are basic unsigned 32 and 64 bits.
-*   The canonical representation follows human-readable write convention, aka big-endian (large digits first).
-*   These functions allow transformation of hash result into and from its canonical format.
-*   This way, hash values can be written into a file or buffer, and remain comparable across different systems and programs.
-*/
 
 XXH_PUBLIC_API void XXH32_canonicalFromHash(XXH32_canonical_t* dst, XXH32_hash_t hash)
 {

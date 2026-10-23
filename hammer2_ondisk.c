@@ -1,38 +1,3 @@
-/*
- * Copyright (c) 2020 Tomohiro Kusumi <tkusumi@netbsd.org>
- * Copyright (c) 2020 The DragonFly Project
- * All rights reserved.
- *
- * This code is derived from software contributed to The DragonFly Project
- * by Matthew Dillon <dillon@dragonflybsd.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of The DragonFly Project nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific, prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
- * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -160,16 +125,15 @@ hammer2_init_devvp(const char *blkdevs, int rootmount,
 	int i, error = 0;
 
 	KKASSERT(TAILQ_EMPTY(devvpl));
-	KKASSERT(blkdevs); /* could be empty string */
+	KKASSERT(blkdevs);
 	p = blkdevs;
 
 	path = objcache_get(namei_oc, M_WAITOK);
 	while (1) {
 		strcpy(path, "");
 		if (*p != '/') {
-			strcpy(path, "/dev/"); /* relative path */
+			strcpy(path, "/dev/");
 		}
-		/* scan beyond "/dev/" */
 		for (i = strlen(path); i < MAXPATHLEN-1; ++i) {
 			if (*p == '\0') {
 				break;
@@ -182,18 +146,15 @@ hammer2_init_devvp(const char *blkdevs, int rootmount,
 			}
 		}
 		path[i] = '\0';
-		/* path shorter than "/dev/" means invalid or done */
 		if (strlen(path) <= strlen("/dev/")) {
 			if (strlen(p)) {
 				hprintf("ignore incomplete path %s\n", path);
 				continue;
 			} else {
-				/* end of string */
 				KKASSERT(*p == '\0');
 				break;
 			}
 		}
-		/* lookup path from above */
 		devvp = NULL;
 		error = hammer2_lookup_device(path, rootmount, &devvp);
 		if (error) {
@@ -220,13 +181,11 @@ hammer2_cleanup_devvp(hammer2_devvp_list_t *devvpl)
 	while (!TAILQ_EMPTY(devvpl)) {
 		e = TAILQ_FIRST(devvpl);
 		TAILQ_REMOVE(devvpl, e, entry);
-		/* devvp */
 		KKASSERT(e->devvp);
 		if (e->devvp->v_rdev)
 			e->devvp->v_rdev->si_mountpoint = NULL;
 		vrele(e->devvp);
 		e->devvp = NULL;
-		/* path */
 		KKASSERT(e->path);
 		kfree(e->path, M_HAMMER2);
 		e->path = NULL;
@@ -245,14 +204,13 @@ hammer2_verify_volumes_common(const hammer2_volume_t *volumes,
 	int i;
 	uuid_t uuid;
 
-	/* check volume header */
 	if (rootvoldata->volu_id != HAMMER2_ROOT_VOLUME) {
 		hprintf("volume id %d must be %d\n", rootvoldata->volu_id,
 			HAMMER2_ROOT_VOLUME);
 		return EINVAL;
 	}
 	uuid = rootvoldata->fstype;
-	snprintf_uuid(buf, sizeof(buf), &uuid); /* takes non-const uuid */
+	snprintf_uuid(buf, sizeof(buf), &uuid);
 	if (strcmp(buf, HAMMER2_UUID_STRING)) {
 		hprintf("volume fstype uuid %s must be %s\n", buf,
 			HAMMER2_UUID_STRING);
@@ -264,7 +222,6 @@ hammer2_verify_volumes_common(const hammer2_volume_t *volumes,
 		if (vol->id == -1)
 			continue;
 		path = vol->dev->path;
-		/* check volume fields are initialized */
 		if (!vol->dev->devvp) {
 			hprintf("%s has NULL devvp\n", path);
 			return EINVAL;
@@ -279,7 +236,6 @@ hammer2_verify_volumes_common(const hammer2_volume_t *volumes,
 				(intmax_t)vol->size);
 			return EINVAL;
 		}
-		/* check volume size vs block device size */
 		if (VOP_IOCTL(vol->dev->devvp, DIOCGPART, (void*)&part, 0,
 			      curthread->td_ucred , NULL) == 0) {
 			if (vol->size > part.media_size) {
@@ -307,7 +263,6 @@ hammer2_verify_volumes_1(const hammer2_volume_t *volumes,
 	const char *path;
 	int i, nvolumes = 0;
 
-	/* check initialized volume count */
 	for (i = 0; i < HAMMER2_MAX_VOLUMES; ++i) {
 		vol = &volumes[i];
 		if (vol->id != -1)
@@ -318,7 +273,6 @@ hammer2_verify_volumes_1(const hammer2_volume_t *volumes,
 		return EINVAL;
 	}
 
-	/* check volume header */
 	if (rootvoldata->nvolumes) {
 		hprintf("volume count %d must be 0\n", rootvoldata->nvolumes);
 		return EINVAL;
@@ -337,7 +291,6 @@ hammer2_verify_volumes_1(const hammer2_volume_t *volumes,
 		}
 	}
 
-	/* check volume */
 	vol = &volumes[HAMMER2_ROOT_VOLUME];
 	path = vol->dev->path;
 	if (vol->id) {
@@ -367,7 +320,6 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 	const char *path;
 	int i, nvolumes = 0;
 
-	/* check initialized volume count */
 	for (i = 0; i < HAMMER2_MAX_VOLUMES; ++i) {
 		vol = &volumes[i];
 		if (vol->id != -1) {
@@ -376,7 +328,6 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 		}
 	}
 
-	/* check volume header */
 	if (rootvoldata->nvolumes != nvolumes) {
 		hprintf("volume header requires %d devices, %d specified\n",
 			rootvoldata->nvolumes, nvolumes);
@@ -404,20 +355,17 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 		}
 	}
 
-	/* check volumes */
 	for (i = 0; i < HAMMER2_MAX_VOLUMES; ++i) {
 		vol = &volumes[i];
 		if (vol->id == -1)
 			continue;
 		path = vol->dev->path;
-		/* check offset */
 		if (vol->offset & HAMMER2_FREEMAP_LEVEL1_MASK) {
 			hprintf("%s's offset 0x%016jx not 0x%016jx aligned\n",
 				path, (intmax_t)vol->offset,
 				HAMMER2_FREEMAP_LEVEL1_SIZE);
 			return EINVAL;
 		}
-		/* check vs previous volume */
 		if (i) {
 			if (vol->id <= (vol-1)->id) {
 				hprintf("%s has inconsistent id %d\n", path,
@@ -429,14 +377,13 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 					path, (intmax_t)vol->offset);
 				return EINVAL;
 			}
-		} else { /* first */
+		} else {
 			if (vol->offset) {
 				hprintf("%s has non zero offset 0x%016jx\n",
 					path, (intmax_t)vol->offset);
 				return EINVAL;
 			}
 		}
-		/* check size for non-last and last volumes */
 		if (i != rootvoldata->nvolumes - 1) {
 			if (vol->size < HAMMER2_FREEMAP_LEVEL1_SIZE) {
 				hprintf("%s's size must be >= 0x%016jx\n", path,
@@ -449,7 +396,7 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 					(intmax_t)HAMMER2_FREEMAP_LEVEL1_SIZE);
 				return EINVAL;
 			}
-		} else { /* last */
+		} else {
 			if (vol->size & HAMMER2_VOLUME_ALIGNMASK64) {
 				hprintf("%s's size is not 0x%016jx aligned\n",
 					path,
@@ -478,9 +425,6 @@ hammer2_verify_volumes(const hammer2_volume_t *volumes,
 		return hammer2_verify_volumes_1(volumes, rootvoldata);
 }
 
-/*
- * Returns zone# of returned volume header or < 0 on failure.
- */
 static int
 hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			   hammer2_volume_data_t *voldata)
@@ -491,13 +435,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 	int zone = -1;
 	int i;
 
-	/*
-	 * There are up to 4 copies of the volume header (syncs iterate
-	 * between them so there is no single master).  We don't trust the
-	 * volu_size field so we don't know precisely how large the filesystem
-	 * is, so depend on the OS to return an error if we go beyond the
-	 * block device's EOF.
-	 */
 	for (i = 0; i < HAMMER2_NUM_VOLHDRS; ++i) {
 		if (bread(devvp, i * HAMMER2_ZONE_BYTES64, HAMMER2_VOLUME_BYTES,
 			  &bp)) {
@@ -507,7 +444,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 		}
 
 		vd = (struct hammer2_volume_data *)bp->b_data;
-		/* verify volume header magic */
 		if ((vd->magic != HAMMER2_VOLUME_ID_HBO) &&
 		    (vd->magic != HAMMER2_VOLUME_ID_ABO)) {
 			hprintf("%s #%d: bad magic\n", path, i);
@@ -517,7 +453,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 		}
 
 		if (vd->magic == HAMMER2_VOLUME_ID_ABO) {
-			/* XXX: Reversed-endianness filesystem */
 			hprintf("%s #%d: reverse-endian filesystem detected\n",
 				path, i);
 			brelse(bp);
@@ -525,7 +460,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			continue;
 		}
 
-		/* verify volume header CRC's */
 		crc0 = vd->icrc_sects[HAMMER2_VOL_ICRC_SECT0];
 		crc1 = hammer2_icrc32(bp->b_data + HAMMER2_VOLUME_ICRC0_OFF,
 				      HAMMER2_VOLUME_ICRC0_SIZE);
@@ -616,7 +550,6 @@ hammer2_init_volumes(struct mount *mp, const hammer2_devvp_list_t *devvpl,
 		path = e->path;
 		KKASSERT(devvp);
 
-		/* returns negative error or positive zone# */
 		error = hammer2_read_volume_header(devvp, path, voldata);
 		if (error < 0) {
 			hprintf("failed to read %s's volume header\n", path);
@@ -624,7 +557,7 @@ hammer2_init_volumes(struct mount *mp, const hammer2_devvp_list_t *devvpl,
 			goto done;
 		}
 		zone = error;
-		error = 0; /* reset error */
+		error = 0;
 
 		if (voldata->volu_id >= HAMMER2_MAX_VOLUMES) {
 			hprintf("%s has bad volume id %d\n", path,
@@ -639,7 +572,6 @@ hammer2_init_volumes(struct mount *mp, const hammer2_devvp_list_t *devvpl,
 			error = EINVAL;
 			goto done;
 		}
-		/* all headers must have the same version, nvolumes and uuid */
 		if (version == -1) {
 			version = voldata->version;
 			nvolumes = voldata->nvolumes;
@@ -677,7 +609,6 @@ hammer2_init_volumes(struct mount *mp, const hammer2_devvp_list_t *devvpl,
 			error = EINVAL;
 			goto done;
 		}
-		/* all per-volume tests passed */
 		vol->dev = e;
 		vol->id = voldata->volu_id;
 		vol->offset = voldata->volu_loff[vol->id];
@@ -715,9 +646,6 @@ hammer2_get_volume(hammer2_dev_t *hmp, hammer2_off_t offset)
 
 	offset &= ~HAMMER2_OFF_MASK_RADIX;
 
-	/* locking is unneeded until volume-add support */
-	//hammer2_voldata_lock(hmp);
-	/* do binary search if users really use this many supported volumes */
 	for (i = 0; i < hmp->nvolumes; ++i) {
 		vol = &hmp->volumes[i];
 		if ((offset >= vol->offset) &&
@@ -726,7 +654,6 @@ hammer2_get_volume(hammer2_dev_t *hmp, hammer2_off_t offset)
 			break;
 		}
 	}
-	//hammer2_voldata_unlock(hmp);
 
 	if (!ret)
 		panic("no volume for offset 0x%016jx", (intmax_t)offset);

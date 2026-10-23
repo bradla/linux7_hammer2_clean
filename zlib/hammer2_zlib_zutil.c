@@ -1,26 +1,19 @@
-/* zutil.c -- target dependent utility functions for the compression library
- * Copyright (C) 1995-2005, 2010, 2011, 2012 Jean-loup Gailly.
- * For conditions of distribution and use, see copyright notice in zlib.h
- */
-
-/* @(#) $Id$ */
-
 #include "hammer2_zlib_zutil.h"
 
 #ifndef NO_DUMMY_DECL
-struct internal_state      {int dummy;}; /* for buggy compilers */
+struct internal_state      {int dummy;};
 #endif
 
 z_const char * const z_errmsg[10] = {
-"need dictionary",     /* Z_NEED_DICT       2  */
-"stream end",          /* Z_STREAM_END      1  */
-"",                    /* Z_OK              0  */
-"file error",          /* Z_ERRNO         (-1) */
-"stream error",        /* Z_STREAM_ERROR  (-2) */
-"data error",          /* Z_DATA_ERROR    (-3) */
-"insufficient memory", /* Z_MEM_ERROR     (-4) */
-"buffer error",        /* Z_BUF_ERROR     (-5) */
-"incompatible version",/* Z_VERSION_ERROR (-6) */
+"need dictionary",
+"stream end",
+"",
+"file error",
+"stream error",
+"data error",
+"insufficient memory",
+"buffer error",
+"incompatible version",
 ""};
 
 const char * zlibVersion(void);
@@ -136,9 +129,6 @@ void ZLIB_INTERNAL z_error (char *m)
 }
 #endif
 
-/* exported to allow conversion of error code to string for compress() and
- * uncompress()
- */
 const
 char*
 zError(int err)
@@ -154,7 +144,7 @@ zmemcpy(Bytef* dest, const Bytef* source, uInt  len)
 {
     if (len == 0) return;
     do {
-        *dest++ = *source++; /* ??? to be unrolled */
+        *dest++ = *source++;
     } while (--len != 0);
 }
 
@@ -176,7 +166,7 @@ zmemzero(Bytef* dest, uInt len)
 {
     if (len == 0) return;
     do {
-        *dest++ = 0;  /* ??? to be unrolled */
+        *dest++ = 0;
     } while (--len != 0);
 }
 #endif

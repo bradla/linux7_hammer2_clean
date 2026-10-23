@@ -1,37 +1,3 @@
-/*
- * Copyright (c) 2011-2018 The DragonFly Project.  All rights reserved.
- *
- * This code is derived from software contributed to The DragonFly Project
- * by Matthew Dillon <dillon@dragonflybsd.org>
- * by Venkatesh Srinivas <vsrinivas@dragonflybsd.org>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name of The DragonFly Project nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific, prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE
- * COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
- * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- */
 #include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -41,9 +7,6 @@
 
 #include "hammer2.h"
 
-/*
- * Return the directory entry type for an inode.
- */
 int
 hammer2_get_dtype(uint8_t type)
 {
@@ -64,17 +27,13 @@ hammer2_get_dtype(uint8_t type)
 		return (DT_LNK);
 	case HAMMER2_OBJTYPE_SOCKET:
 		return (DT_SOCK);
-	case HAMMER2_OBJTYPE_WHITEOUT:	/* not supported */
+	case HAMMER2_OBJTYPE_WHITEOUT:
 		return (DT_UNKNOWN);
 	default:
 		return (DT_UNKNOWN);
 	}
-	/* not reached */
 }
 
-/*
- * Return the directory entry type for an inode
- */
 int
 hammer2_get_vtype(uint8_t type)
 {
@@ -95,12 +54,11 @@ hammer2_get_vtype(uint8_t type)
 		return (VLNK);
 	case HAMMER2_OBJTYPE_SOCKET:
 		return (VSOCK);
-	case HAMMER2_OBJTYPE_WHITEOUT:	/* not supported */
+	case HAMMER2_OBJTYPE_WHITEOUT:
 		return (VBAD);
 	default:
 		return (VBAD);
 	}
-	/* not reached */
 }
 
 uint8_t
@@ -124,12 +82,8 @@ hammer2_get_obj_type(enum vtype vtype)
 	default:
 		return(HAMMER2_OBJTYPE_UNKNOWN);
 	}
-	/* not reached */
 }
 
-/*
- * Convert a hammer2 64-bit time to a timespec.
- */
 void
 hammer2_time_to_timespec(uint64_t xtime, struct timespec *ts)
 {
@@ -147,9 +101,6 @@ hammer2_timespec_to_time(const struct timespec *ts)
 	return(xtime);
 }
 
-/*
- * Convert a uuid to a unix uid or gid
- */
 uint32_t
 hammer2_to_unix_xid(const uuid_t *uuid)
 {
@@ -163,17 +114,6 @@ hammer2_guid_to_uuid(uuid_t *uuid, uint32_t guid)
 	*(uint32_t *)&uuid->node[2] = guid;
 }
 
-/*
- * Borrow HAMMER1's directory hash algorithm #1 with a few modifications.
- * The filename is split into fields which are hashed separately and then
- * added together.
- *
- * Differences include: bit 63 must be set to 1 for HAMMER2 (HAMMER1 sets
- * it to 0), this is because bit63=0 is used for hidden hardlinked inodes.
- * (This means we do not need to do a 0-check/or-with-0x100000000 either).
- *
- * Also, the iscsi crc code is used instead of the old crc32 code.
- */
 hammer2_key_t
 hammer2_dirhash(const char *aname, size_t len)
 {
@@ -184,9 +124,6 @@ hammer2_dirhash(const char *aname, size_t len)
 
 	key = 0;
 
-	/*
-	 * m32
-	 */
 	crcx = 0;
 	for (i = j = 0; i < len; ++i) {
 		if (aname[i] == '.' ||
@@ -201,68 +138,37 @@ hammer2_dirhash(const char *aname, size_t len)
 	if (i != j)
 		crcx += hammer2_icrc32(aname + j, i - j);
 
-	/*
-	 * The directory hash utilizes the top 32 bits of the 64-bit key.
-	 * Bit 63 must be set to 1.
-	 */
 	crcx |= 0x80000000U;
 	key |= (uint64_t)crcx << 32;
 
-	/*
-	 * l16 - crc of entire filename
-	 *
-	 * This crc reduces degenerate hash collision conditions.
-	 */
 	crcx = hammer2_icrc32(aname, len);
 	crcx = crcx ^ (crcx << 16);
 	key |= crcx & 0xFFFF0000U;
 
-	/*
-	 * Set bit 15.  This allows readdir to strip bit 63 so a positive
-	 * 64-bit cookie/offset can always be returned, and still guarantee
-	 * that the values 0x0000-0x7FFF are available for artificial entries.
-	 * ('.' and '..').
-	 */
 	key |= 0x8000U;
 
 	return (key);
 }
 
-/*
- * Convert bytes to radix with no limitations.
- *
- * 0 bytes is special-cased to a radix of zero (which would normally
- * translate to (1 << 0) == 1).
- */
 int
 hammer2_getradix(size_t bytes)
 {
 	int radix;
 
-	/*
-	 * Optimize the iteration by pre-checking commonly used radixes.
-	 */
 	if (bytes == HAMMER2_PBUFSIZE)
 		radix = HAMMER2_PBUFRADIX;
 	else if (bytes >= HAMMER2_LBUFSIZE)
 		radix = HAMMER2_LBUFRADIX;
-	else if (bytes >= HAMMER2_ALLOC_MIN)	/* clamp */
+	else if (bytes >= HAMMER2_ALLOC_MIN)
 		radix = HAMMER2_RADIX_MIN;
 	else
 		radix = 0;
 
-	/*
-	 * Iterate as needed.  Note that bytes == 0 is expected to return
-	 * a radix of 0 as a special case.
-	 */
 	while (((size_t)1 << radix) < bytes)
 		++radix;
 	return (radix);
 }
 
-/*
- * The logical block size is currently always PBUFSIZE.
- */
 int
 hammer2_calc_logical(hammer2_inode_t *ip, hammer2_off_t uoff,
 		     hammer2_key_t *lbasep, hammer2_key_t *leofp)
@@ -276,13 +182,6 @@ hammer2_calc_logical(hammer2_inode_t *ip, hammer2_off_t uoff,
 	return (HAMMER2_PBUFSIZE);
 }
 
-/*
- * Calculate the physical block size.  pblksize <= lblksize.  Primarily
- * used to calculate a smaller physical block for the logical block
- * containing the file EOF.
- *
- * Returns 0 if the requested base offset is beyond the file EOF.
- */
 int
 hammer2_calc_physical(hammer2_inode_t *ip, hammer2_key_t lbase)
 {
@@ -375,11 +274,6 @@ hammer2_adjwritecounter(int btype, size_t bytes)
 	*counterp += bytes;
 }
 
-/*
- * Check for pending signal to allow interruption.  This function will
- * return immediately if the calling thread is a kernel thread and not
- * a user thread.
- */
 int
 hammer2_signal_check(time_t *timep)
 {
