@@ -1,0 +1,23 @@
+SUBDIRS = sbin/hammer2 sbin/newfs_hammer2 sbin/fsck_hammer2 lib/libc/gen lib/libc/string lib/libutil lib/libdmsg sys/libkern sys/crypto/sha2 sys/vfs/hammer2/xxhash
+BINDIRS = sbin/hammer2 sbin/newfs_hammer2 sbin/fsck_hammer2 share/man/man5
+
+.PHONY: all clean $(SUBDIRS) $(BINDIRS)
+
+all: $(SUBDIRS)
+$(SUBDIRS):
+	$(MAKE) -C $@
+sbin/hammer2: lib/libc/gen lib/libc/string lib/libutil lib/libdmsg sys/libkern sys/vfs/hammer2/xxhash
+sbin/newfs_hammer2: sbin/hammer2 lib/libc/gen sys/libkern sys/vfs/hammer2/xxhash
+sbin/fsck_hammer2: sbin/hammer2 sys/libkern sys/vfs/hammer2/xxhash lib/libc/string
+clean:
+	for dir in $(SUBDIRS); do \
+		$(MAKE) -C $$dir $@; \
+	done
+install:
+	for dir in $(BINDIRS); do \
+		$(MAKE) -C $$dir $@; \
+	done
+uninstall:
+	for dir in $(BINDIRS); do \
+		$(MAKE) -C $$dir $@; \
+	done

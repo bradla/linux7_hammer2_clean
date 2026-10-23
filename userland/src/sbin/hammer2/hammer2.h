@@ -1,0 +1,142 @@
+#ifndef HAMMER2_HAMMER2_H_
+#define HAMMER2_HAMMER2_H_
+
+#define _GNU_SOURCE
+
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/queue.h>
+#include <sys/mount.h>
+#include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/statfs.h>
+
+#include <netdb.h>
+#include <dmsg.h>
+#include <dirent.h>
+#include <sys/dfly.h>
+
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+
+#include <vfs/hammer2/hammer2_disk.h>
+#include <vfs/hammer2/hammer2_mount.h>
+#include <vfs/hammer2/hammer2_ioctl.h>
+#include <vfs/hammer2/hammer2_xxhash.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <stddef.h>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <uuid/uuid.h>
+#include <assert.h>
+#include <pthread.h>
+#include <poll.h>
+
+#include <libutil.h>
+
+#include "hammer2_subs.h"
+
+#include "../lib/libc/gen/util.h"
+
+#define HAMMER2_DEFAULT_DIR	"/etc/hammer2"
+#define HAMMER2_PATH_REMOTE	HAMMER2_DEFAULT_DIR "/remote"
+#ifndef UDEV_DEVICE_PATH
+#define UDEV_DEVICE_PATH	"/dev/udev"
+#endif
+
+#define HAMMER2_CHECK_STRINGS		{ "none", "disabled", "crc32", \
+					  "xxhash64", "sha192" }
+#define HAMMER2_CHECK_STRINGS_COUNT	5
+
+#define HAMMER2_COMP_STRINGS		{ "none", "autozero", "lz4", "zlib" }
+#define HAMMER2_COMP_STRINGS_COUNT	4
+
+#if 0
+struct hammer2_idmap {
+	struct hammer2_idmap *next;
+	uint32_t ran_beg;
+	uint32_t ran_end;
+};
+
+typedef struct hammer2_idmap hammer2_idmap_t;
+
+struct hammer2_udppkt {
+	char	key[8];
+	char	gen[8];
+	char	label[64];
+};
+
+typedef struct hammer2_udppkt hammer2_udppkt_t;
+#endif
+
+extern int DebugOpt;
+extern int VerboseOpt;
+extern int QuietOpt;
+extern int ForceOpt;
+extern int RecurseOpt;
+extern int NormalExit;
+extern size_t MemOpt;
+
+void hammer2_demon(void *(*func)(void *), void *arg);
+
+int cmd_remote_connect(const char *sel_path, const char *url);
+int cmd_remote_disconnect(const char *sel_path, const char *url);
+int cmd_remote_status(const char *sel_path, int all_opt);
+
+int cmd_pfs_getid(const char *sel_path, const char *name, int privateid);
+int cmd_pfs_list(int ac, char **av);
+int cmd_pfs_create(const char *sel_path, const char *name,
+			uint8_t pfs_type, const char *uuid_str);
+int cmd_pfs_delete(const char *sel_path, char **av, int ac);
+int cmd_pfs_snapshot(const char *sel_path, const char *name, const char *label,
+			uint32_t pfs_flags);
+
+int cmd_service(int ac, char **av);
+int cmd_hash(int ac, const char **av);
+int cmd_dhash(int ac, const char **av);
+int cmd_info(int ac, const char **av);
+int cmd_mountall(int ac, const char **av);
+int cmd_stat(int ac, const char **av);
+int cmd_leaf(const char *sel_path);
+int cmd_shell(const char *hostname);
+int cmd_debugspan(const char *hostname);
+int cmd_pullfile(const char *hostname, const char *remotepath,
+		 const char *localpath);
+int cmd_destroy_path(int ac, const char **av);
+int cmd_destroy_inum(const char *sel_path, int ac, const char **av);
+int cmd_dumpchain(const char *path, u_int flags);
+int cmd_emergency_mode(const char *sel_path, int enable,
+			int ac, const char **av);
+int cmd_growfs(const char *sel_path, int ac, const char **av);
+int cmd_recover(const char *devpath, const char *filename,
+			const char *destdir, int strict, int isafile);
+int cmd_show(const char *devpath, const char *chspec, int which);
+int cmd_volume_list(int ac, char **av);
+int cmd_rsainit(const char *dir_path);
+int cmd_rsaenc(const char **keys, int nkeys);
+int cmd_rsadec(const char **keys, int nkeys);
+int cmd_setcomp(const char *comp_str, char **paths);
+int cmd_setcheck(const char *comp_str, char **paths);
+int cmd_bulkfree(const char *dir_path);
+int cmd_cleanup(const char *dir_path);
+#if 0
+int cmd_bulkfree_async(const char *dir_path);
+#endif
+
+void hammer2_shell_parse(dmsg_msg_t *msg, int unmanaged);
+void print_inode(const char *path);
+
+#endif
