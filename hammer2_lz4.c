@@ -9,42 +9,27 @@
 #endif
 
 #if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+
 #else
 #  define restrict
 #endif
 
-#define GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__)
-
-#if (GCC_VERSION >= 302) || (__INTEL_COMPILER >= 800) || defined(__clang__)
-#  define expect(expr,value)    (__builtin_expect ((expr),(value)) )
-#else
-#  define expect(expr,value)    (expr)
-#endif
-
-#define likely(expr)     expect((expr) != 0, 1)
-#define unlikely(expr)   expect((expr) != 0, 0)
-
 #include "hammer2.h"
 #include "hammer2_lz4.h"
-#include <sys/malloc.h>
 
-static MALLOC_DEFINE(C_HASHTABLE, "comphashtable",
-	"A hash table used by LZ4 compression function.");
+#undef likely
+#undef unlikely
+#define likely(x)	(__builtin_expect(!!(x), 1))
+#define unlikely(x)	(__builtin_expect(!!(x), 0))
+#define expect(expr, value) (__builtin_expect((expr), (value)))
 
-#if defined (__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-# include <sys/stdint.h>
-  typedef uint8_t  BYTE;
-  typedef uint16_t U16;
-  typedef uint32_t U32;
-  typedef  int32_t S32;
-  typedef uint64_t U64;
-#else
-  typedef unsigned char       BYTE;
-  typedef unsigned short      U16;
-  typedef unsigned int        U32;
-  typedef   signed int        S32;
-  typedef unsigned long long  U64;
-#endif
+#define M_HAMMER2_LZ4	NULL
+
+typedef uint8_t  BYTE;
+typedef uint16_t U16;
+typedef uint32_t U32;
+typedef  int32_t S32;
+typedef uint64_t U64;
 
 #if defined(__GNUC__)  && !defined(LZ4_FORCE_UNALIGNED_ACCESS)
 #  define _PACKED __attribute__ ((packed))
@@ -211,13 +196,21 @@ LZ4_NbCommonBytes (register U32 val)
 void*
 LZ4_create(void)
 {
-	return kmalloc(HASHTABLESIZE, C_HASHTABLE, M_INTWAIT);
+#ifdef __KERNEL__
+	return hmalloc(HASHTABLESIZE, M_HAMMER2_LZ4, M_WAITOK);
+#else
+	return malloc(HASHTABLESIZE);
+#endif
 }
 
 int
 LZ4_free(void* ctx)
 {
-	kfree(ctx, C_HASHTABLE);
+#ifdef __KERNEL__
+	hfree(ctx, M_HAMMER2_LZ4, HASHTABLESIZE);
+#else
+	free(ctx);
+#endif
 	return 0;
 }
 
@@ -254,6 +247,7 @@ int LZ4_decompress_generic(
                  int targetOutputSize
                  )
 {
+
     BYTE* restrict ip = (BYTE*) source;
     BYTE* ref;
     BYTE* iend = ip + inputSize;
@@ -269,6 +263,7 @@ int LZ4_decompress_generic(
 #endif
 
     if ((partialDecoding) && (oexit> oend-MFLIMIT)) oexit = oend-MFLIMIT;
+
     if unlikely(outputSize==0) goto _output_error;
 
     while (1)
@@ -295,18 +290,23 @@ int LZ4_decompress_generic(
             if (partialDecoding)
             {
                 if (cpy > oend) goto _output_error;
+
                 if ((endOnInput) && (ip+length > iend)) goto _output_error;
+
             }
             else
             {
                 if ((!endOnInput) && (cpy != oend)) goto _output_error;
+
                 if ((endOnInput) && ((ip+length != iend) || (cpy > oend)))
 					goto _output_error;
+
             }
             memcpy(op, ip, length);
             ip += length;
             op += length;
             break;
+
         }
         LZ4_WILDCOPY(ip, op, cpy); ip -= (op-cpy); op = cpy;
 
@@ -317,6 +317,7 @@ int LZ4_decompress_generic(
         if ((length=(token&ML_MASK)) == ML_MASK)
         {
             while (endOnInput ? ip<iend-(LASTLITERALS+1) : 1)
+
             {
                 unsigned s = *ip++;
                 length += s;
@@ -345,6 +346,7 @@ int LZ4_decompress_generic(
         if unlikely(cpy>oend-(COPYLENGTH)-(STEPSIZE-4))
         {
             if (cpy > oend-LASTLITERALS) goto _output_error;
+
             LZ4_SECURECOPY(ref, op, (oend-COPYLENGTH));
             while(op<cpy) *op++=*ref++;
             op=cpy;

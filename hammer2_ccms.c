@@ -1,12 +1,9 @@
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <machine/limits.h>
-
-#include <sys/spinlock2.h>
-
-#include "hammer2_ccms.h"
 #include "hammer2.h"
+#include "hammer2_ccms.h"
+
+#undef ssleep
+#define ssleep(ident, spin, flags, wmesg, timo) \
+	hammer2_spin_ssleep((ident), (spin), (flags), (wmesg), (timo))
 
 int ccms_debug = 0;
 
@@ -22,12 +19,14 @@ ccms_cst_uninit(ccms_cst_t *cst)
 {
 	KKASSERT(cst->count == 0);
 	if (cst->state != CCMS_STATE_INVALID) {
+
 	}
 }
 
 void
 ccms_thread_lock(ccms_cst_t *cst, ccms_state_t state)
 {
+
 	LOCKENTER;
 	if (cst->count < 0 && cst->td == curthread) {
 		--cst->count;
@@ -112,6 +111,7 @@ ccms_thread_lock_temp_restore(ccms_cst_t *cst, ccms_state_t ostate)
 ccms_state_t
 ccms_thread_lock_upgrade(ccms_cst_t *cst)
 {
+
 	if (cst->count < 0) {
 		KKASSERT(cst->td == curthread);
 		return(CCMS_STATE_EXCLUSIVE);
@@ -131,6 +131,7 @@ ccms_thread_lock_upgrade(ccms_cst_t *cst)
 		return(CCMS_STATE_SHARED);
 	}
 	panic("ccms_thread_lock_upgrade: not locked");
+
 	return(0);
 }
 
@@ -152,6 +153,7 @@ ccms_thread_lock_downgrade(ccms_cst_t *cst, ccms_state_t ostate)
 			hammer2_spin_unex(&cst->spin);
 		}
 	}
+
 }
 
 void
@@ -159,6 +161,7 @@ ccms_thread_unlock(ccms_cst_t *cst)
 {
 	LOCKEXIT;
 	if (cst->count < 0) {
+
 		KKASSERT(cst->td == curthread);
 		if (cst->count < -1) {
 			++cst->count;
@@ -176,6 +179,7 @@ ccms_thread_unlock(ccms_cst_t *cst)
 		}
 		hammer2_spin_unex(&cst->spin);
 	} else if (cst->count > 0) {
+
 		hammer2_spin_ex(&cst->spin);
 		if (--cst->count == 0 && cst->blocked) {
 			cst->blocked = 0;

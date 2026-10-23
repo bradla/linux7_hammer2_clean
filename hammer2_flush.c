@@ -1,12 +1,6 @@
-#include <sys/cdefs.h>
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/types.h>
-#include <sys/lock.h>
-#include <sys/vnode.h>
-#include <sys/buf.h>
-
 #include "hammer2.h"
+#include <linux/bio.h>
+#include <linux/blkdev.h>
 
 #define HAMMER2_FLUSH_DEPTH_LIMIT	60
 
@@ -27,9 +21,8 @@ struct hammer2_flush_info {
 
 typedef struct hammer2_flush_info hammer2_flush_info_t;
 
-static int hammer2_flush_core(hammer2_flush_info_t *info,
-				hammer2_chain_t *chain, int flags);
-static int hammer2_flush_recurse(hammer2_chain_t *child, void *data);
+static int hammer2_flush_core(hammer2_flush_info_t *, hammer2_chain_t *, int);
+static int hammer2_flush_recurse(hammer2_chain_t *, void *);
 
 void
 hammer2_trans_manage_init(hammer2_pfs_t *pmp)
@@ -39,16 +32,17 @@ hammer2_trans_manage_init(hammer2_pfs_t *pmp)
 void
 hammer2_trans_init(hammer2_pfs_t *pmp, uint32_t flags)
 {
-	uint32_t oflags;
-	uint32_t nflags;
+	uint32_t oflags, nflags;
 	int dowait;
 
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
 		dowait = 0;
 
 		if (flags & HAMMER2_TRANS_ISFLUSH) {
+
 			if (oflags & HAMMER2_TRANS_ISFLUSH) {
 				nflags = oflags | HAMMER2_TRANS_WAITING;
 				dowait = 1;
@@ -56,37 +50,25 @@ hammer2_trans_init(hammer2_pfs_t *pmp, uint32_t flags)
 				nflags = (oflags | flags) + 1;
 			}
 		} else if (flags & HAMMER2_TRANS_BUFCACHE) {
+
 			nflags = (oflags | flags) + 1;
 		} else {
+
 			nflags = (oflags | flags) + 1;
 		}
-		if (dowait)
-			tsleep_interlock(&pmp->trans.sync_wait, 0);
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if (dowait == 0)
 				break;
-			tsleep(&pmp->trans.sync_wait, PINTERLOCKED,
-			       "h2trans", hz);
+			hammer2_lkc_sleep(&pmp->trans_cv, &pmp->trans_lock,
+			    "h2pmp_tr", 0);
+
 		} else {
 			cpu_pause();
-		}
-	}
 
-#if 0
-	while ((flags & HAMMER2_TRANS_ISFLUSH) &&
-	       (flags & HAMMER2_TRANS_COPYQ)) {
-		oflags = pmp->trans.flags;
-		cpu_ccfence();
-		if ((oflags & HAMMER2_TRANS_MASK) == 1)
-			break;
-		nflags = oflags | HAMMER2_TRANS_WAITING;
-		tsleep_interlock(&pmp->trans.sync_wait, 0);
-		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
-			tsleep(&pmp->trans.sync_wait, PINTERLOCKED,
-			       "h2trans2", hz);
 		}
+
 	}
-#endif
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 hammer2_tid_t
@@ -108,57 +90,52 @@ hammer2_trans_setflags(hammer2_pfs_t *pmp, uint32_t flags)
 void
 hammer2_trans_clearflags(hammer2_pfs_t *pmp, uint32_t flags)
 {
-	uint32_t oflags;
-	uint32_t nflags;
+	uint32_t oflags, nflags;
 
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
 		nflags = oflags & ~flags;
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if ((oflags ^ nflags) & HAMMER2_TRANS_WAITING)
-				wakeup(&pmp->trans.sync_wait);
+				hammer2_lkc_wakeup(&pmp->trans_cv);
 			break;
 		}
 		cpu_pause();
+
 	}
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 void
 hammer2_trans_done(hammer2_pfs_t *pmp, uint32_t flags)
 {
-	uint32_t oflags;
-	uint32_t nflags;
+	uint32_t oflags, nflags;
 
-#if 0
-	if ((flags & HAMMER2_TRANS_SIDEQ) &&
-	    pmp->sideq_count > hammer2_limit_dirty_inodes / 2 &&
-	    pmp->sideq_count > (pmp->inum_count >> 3) &&
-	    pmp->mp) {
-		speedup_syncer(pmp->mp);
-	}
-#endif
-
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
 		KKASSERT(oflags & HAMMER2_TRANS_MASK);
 
 		nflags = (oflags - 1) & ~flags;
-		if (flags & HAMMER2_TRANS_ISFLUSH) {
+		if (flags & HAMMER2_TRANS_ISFLUSH)
 			nflags &= ~HAMMER2_TRANS_WAITING;
-		}
+
 		if ((oflags & (HAMMER2_TRANS_ISFLUSH|HAMMER2_TRANS_MASK)) ==
-		    (HAMMER2_TRANS_ISFLUSH|2)) {
+		    (HAMMER2_TRANS_ISFLUSH|2))
 			nflags &= ~HAMMER2_TRANS_WAITING;
-		}
+
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if ((oflags ^ nflags) & HAMMER2_TRANS_WAITING)
-				wakeup(&pmp->trans.sync_wait);
+				hammer2_lkc_wakeup(&pmp->trans_cv);
 			break;
 		}
 		cpu_pause();
+
 	}
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 hammer2_tid_t
@@ -168,7 +145,7 @@ hammer2_trans_newinum(hammer2_pfs_t *pmp)
 
 	tid = atomic_fetchadd_64(&pmp->inode_tid, 1);
 
-	return tid;
+	return (tid);
 }
 
 void
@@ -195,12 +172,9 @@ hammer2_flush(hammer2_chain_t *chain, int flags)
 	loops = 0;
 
 	for (;;) {
+
 		if (info.parent != chain->parent) {
-			if (hammer2_debug & 0x0040) {
-				kprintf("LOST CHILD4 %p->%p "
-					"(actual parent %p)\n",
-					info.parent, chain, chain->parent);
-			}
+			hprintf("lost child4\n");
 			hammer2_chain_drop(info.parent);
 			info.parent = chain->parent;
 			hammer2_chain_ref(info.parent);
@@ -208,50 +182,44 @@ hammer2_flush(hammer2_chain_t *chain, int flags)
 		if (hammer2_flush_core(&info, chain, flags) == 0)
 			break;
 
-		if (++loops % 1000 == 0) {
-			kprintf("hammer2_flush: excessive loops on %p\n",
-				chain);
-			if (hammer2_debug & 0x100000)
-				Debugger("hell4");
-		}
+		if (++loops % 1000 == 0)
+			hprintf("excessive loops\n");
 	}
 #ifdef HAMMER2_SCAN_DEBUG
 	if (info.scan_count >= 10)
-	kprintf("hammer2_flush: scan_count %ld (%ld,%ld,%ld,%ld) "
-		"bt(%ld,%ld,%ld,%ld,%ld,%ld)\n",
-		info.scan_count,
-		info.scan_mod_count,
-		info.scan_upd_count,
-		info.scan_onf_count,
-		info.scan_del_count,
-		info.scan_btype[1],
-		info.scan_btype[2],
-		info.scan_btype[3],
-		info.scan_btype[4],
-		info.scan_btype[5],
-		info.scan_btype[6]);
+		hprintf("scan_count %ld (%ld,%ld,%ld,%ld) "
+		    "bt(%ld,%ld,%ld,%ld,%ld,%ld)\n",
+		    info.scan_count,
+		    info.scan_mod_count,
+		    info.scan_upd_count,
+		    info.scan_onf_count,
+		    info.scan_del_count,
+		    info.scan_btype[1],
+		    info.scan_btype[2],
+		    info.scan_btype[3],
+		    info.scan_btype[4],
+		    info.scan_btype[5],
+		    info.scan_btype[6]);
 #endif
 	hammer2_chain_drop(chain);
 	if (info.parent)
 		hammer2_chain_drop(info.parent);
+
 	return (info.error);
 }
 
 static int
 hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
-		   int flags)
+    int flags)
 {
+	hammer2_dev_t *hmp = chain->hmp;
 	hammer2_chain_t *parent;
-	hammer2_dev_t *hmp;
-	int save_error;
-	int retry;
-
-	retry = 0;
+	hammer2_blockref_t *base;
+	hammer2_inode_data_t *ipdata;
+	int count, save_error, retry = 0;
 
 	if ((chain->flags & HAMMER2_CHAIN_FLUSH_MASK) == 0)
-		return 0;
-
-	hmp = chain->hmp;
+		return (0);
 
 	parent = info->parent;
 	KKASSERT(chain->parent == parent);
@@ -260,42 +228,36 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	    (flags & HAMMER2_FLUSH_ALL) == 0 &&
 	    (flags & HAMMER2_FLUSH_TOP) == 0 &&
 	    chain->pmp && chain->pmp->mp) {
+
 		if (chain->flags & (HAMMER2_CHAIN_ONFLUSH |
-				    HAMMER2_CHAIN_DESTROY |
-				    HAMMER2_CHAIN_MODIFIED)) {
+		    HAMMER2_CHAIN_DESTROY | HAMMER2_CHAIN_MODIFIED))
 			hammer2_chain_setflush(parent);
-		}
 		goto done;
 	} else if (chain->bref.type == HAMMER2_BREF_TYPE_INODE &&
-		   (flags & HAMMER2_FLUSH_INODE_STOP) &&
-		   (flags & HAMMER2_FLUSH_ALL) == 0 &&
-		   (flags & HAMMER2_FLUSH_TOP) == 0 &&
-		   chain->pmp && chain->pmp->mp) {
+	    (flags & HAMMER2_FLUSH_INODE_STOP) &&
+	    (flags & HAMMER2_FLUSH_ALL) == 0 &&
+	    (flags & HAMMER2_FLUSH_TOP) == 0 &&
+	    chain->pmp && chain->pmp->mp) {
+
 		goto done;
-#if 0
-		if (chain->flags & (HAMMER2_CHAIN_ONFLUSH |
-				    HAMMER2_CHAIN_DESTROY |
-				    HAMMER2_CHAIN_MODIFIED)) {
-			if (parent)
-				hammer2_chain_setflush(parent);
-		}
-#endif
 	} else if (info->depth == HAMMER2_FLUSH_DEPTH_LIMIT) {
-		panic("hammer2: flush depth limit");
-	} else if (chain->flags & (HAMMER2_CHAIN_ONFLUSH |
-				   HAMMER2_CHAIN_DESTROY)) {
+
+		hpanic("flush depth limit");
+	} else if (chain->flags &
+	    (HAMMER2_CHAIN_ONFLUSH | HAMMER2_CHAIN_DESTROY)) {
+
 		atomic_clear_int(&chain->flags, HAMMER2_CHAIN_ONFLUSH);
 		save_error = info->error;
 		info->error = 0;
 		info->parent = chain;
 
 		hammer2_spin_ex(&chain->core.spin);
-		RB_SCAN(hammer2_chain_tree, &chain->core.rbtree,
-			NULL, hammer2_flush_recurse, info);
+		RB_SCAN(hammer2_chain_tree, &chain->core.rbtree, NULL,
+		    hammer2_flush_recurse, info);
 		if (chain->flags & HAMMER2_CHAIN_ONFLUSH) {
 			atomic_clear_int(&chain->flags, HAMMER2_CHAIN_ONFLUSH);
-			RB_SCAN(hammer2_chain_tree, &chain->core.rbtree,
-				NULL, hammer2_flush_recurse, info);
+			RB_SCAN(hammer2_chain_tree, &chain->core.rbtree, NULL,
+			    hammer2_flush_recurse, info);
 		}
 		hammer2_spin_unex(&chain->core.spin);
 		info->parent = parent;
@@ -305,8 +267,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 		info->error |= save_error;
 
 		if (chain->parent != parent) {
-			kprintf("LOST CHILD2 %p->%p (actual parent %p)\n",
-				parent, chain, chain->parent);
+			hprintf("lost child2\n");
 			goto done;
 		}
 	}
@@ -319,7 +280,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	hammer2_chain_drop_unhold(chain);
 
 	if ((parent && parent->error) || chain->error) {
-		kprintf("hammer2: chain error during flush\n");
+		hprintf("chain error during flush\n");
 		info->error |= chain->error;
 		if (parent) {
 			info->error |= parent->error;
@@ -329,10 +290,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	}
 
 	if (chain->parent != parent) {
-		if (hammer2_debug & 0x0040) {
-			kprintf("LOST CHILD3 %p->%p (actual parent %p)\n",
-				parent, chain, chain->parent);
-		}
+		hprintf("lost child3\n");
 		KKASSERT(parent != NULL);
 		hammer2_chain_unlock(parent);
 		retry = 1;
@@ -344,139 +302,99 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 
 	if (chain->flags & HAMMER2_CHAIN_MODIFIED) {
 		KKASSERT((chain->flags & HAMMER2_CHAIN_UPDATE) ||
-			 chain->parent == NULL);
+		    chain->parent == NULL);
 		atomic_clear_int(&chain->flags, HAMMER2_CHAIN_MODIFIED);
-		atomic_add_long(&hammer2_count_modified_chains, -1);
+		atomic_add_int(&hammer2_count_chain_modified, -1);
 
-		if (chain->pmp)
-			hammer2_pfs_memory_wakeup(chain->pmp, -1);
+		if (chain->bref.type != HAMMER2_BREF_TYPE_DATA)
+			debug_hprintf("flush %s chain %016llx %016llx/%d\n",
+			    hammer2_breftype_to_str(chain->bref.type),
+			    (long long)chain->bref.data_off,
+			    (long long)chain->bref.key, chain->bref.keybits);
 
-#if 0
-		if ((chain->flags & HAMMER2_CHAIN_UPDATE) == 0 &&
-		    chain != &hmp->vchain &&
-		    chain != &hmp->fchain) {
-			atomic_set_int(&chain->flags, HAMMER2_CHAIN_UPDATE);
-		}
-#endif
-
-		if (hammer2_debug & 0x1000) {
-			kprintf("Flush %p.%d %016jx/%d data=%016jx\n",
-				chain, chain->bref.type,
-				(uintmax_t)chain->bref.key,
-				chain->bref.keybits,
-				(uintmax_t)chain->bref.data_off);
-		}
-
-		switch(chain->bref.type) {
+		switch (chain->bref.type) {
 		case HAMMER2_BREF_TYPE_FREEMAP:
+
 			KKASSERT(hmp->vchain.flags & HAMMER2_CHAIN_MODIFIED);
 			KKASSERT(chain == &hmp->fchain);
 			hmp->voldata.freemap_tid = chain->bref.mirror_tid;
-			if (hammer2_debug & 0x8000) {
-				kprintf("sync freemap mirror_tid %08jx\n",
-					(intmax_t)chain->bref.mirror_tid);
-			}
+			debug_hprintf("sync freemap mirror_tid %016llx\n",
+			    (long long)chain->bref.mirror_tid);
 
 			++hmp->voldata.mirror_tid;
 			break;
 		case HAMMER2_BREF_TYPE_VOLUME:
-			hammer2_chain_lock(&hmp->fchain,
-					   HAMMER2_RESOLVE_ALWAYS);
-			hammer2_voldata_lock(hmp);
-			if (hammer2_debug & 0x8000) {
-				kprintf("sync volume  mirror_tid %08jx\n",
-					(intmax_t)chain->bref.mirror_tid);
-			}
 
-			if (hmp->voldata.mirror_tid < chain->bref.mirror_tid) {
+			hammer2_chain_lock(&hmp->fchain,
+			    HAMMER2_RESOLVE_ALWAYS);
+			hammer2_voldata_lock(hmp);
+			debug_hprintf("sync volume mirror_tid %016llx\n",
+			    (long long)chain->bref.mirror_tid);
+
+			if (hmp->voldata.mirror_tid < chain->bref.mirror_tid)
 				hmp->voldata.mirror_tid =
-					chain->bref.mirror_tid;
-			}
+				    chain->bref.mirror_tid;
 
 			KKASSERT(chain->data != NULL);
 			KKASSERT(chain->dio == NULL);
 
-			hmp->voldata.icrc_sects[HAMMER2_VOL_ICRC_SECT1]=
-				hammer2_icrc32(
-					(char *)&hmp->voldata +
-					 HAMMER2_VOLUME_ICRC1_OFF,
-					HAMMER2_VOLUME_ICRC1_SIZE);
-			hmp->voldata.icrc_sects[HAMMER2_VOL_ICRC_SECT0]=
-				hammer2_icrc32(
-					(char *)&hmp->voldata +
-					 HAMMER2_VOLUME_ICRC0_OFF,
-					HAMMER2_VOLUME_ICRC0_SIZE);
+			hmp->voldata.icrc_sects[HAMMER2_VOL_ICRC_SECT1] =
+			    hammer2_icrc32((char *)&hmp->voldata +
+			    HAMMER2_VOLUME_ICRC1_OFF,
+			    HAMMER2_VOLUME_ICRC1_SIZE);
+			hmp->voldata.icrc_sects[HAMMER2_VOL_ICRC_SECT0] =
+			    hammer2_icrc32((char *)&hmp->voldata +
+			    HAMMER2_VOLUME_ICRC0_OFF,
+			    HAMMER2_VOLUME_ICRC0_SIZE);
 			hmp->voldata.icrc_volheader =
-				hammer2_icrc32(
-					(char *)&hmp->voldata +
-					 HAMMER2_VOLUME_ICRCVH_OFF,
-					HAMMER2_VOLUME_ICRCVH_SIZE);
-
-			if (hammer2_debug & 0x8000) {
-				kprintf("syncvolhdr %016jx %016jx\n",
-					hmp->voldata.mirror_tid,
-					hmp->vchain.bref.mirror_tid);
-			}
+			    hammer2_icrc32((char *)&hmp->voldata +
+			    HAMMER2_VOLUME_ICRCVH_OFF,
+			    HAMMER2_VOLUME_ICRCVH_SIZE);
+			debug_hprintf("sync volhdr %016llx %016llx\n",
+			    (long long)hmp->voldata.mirror_tid,
+			    (long long)hmp->vchain.bref.mirror_tid);
 			hmp->volsync = hmp->voldata;
 			atomic_set_int(&chain->flags, HAMMER2_CHAIN_VOLUMESYNC);
 			hammer2_voldata_unlock(hmp);
 			hammer2_chain_unlock(&hmp->fchain);
 			break;
 		case HAMMER2_BREF_TYPE_DATA:
+
 			break;
 		case HAMMER2_BREF_TYPE_INDIRECT:
 		case HAMMER2_BREF_TYPE_FREEMAP_NODE:
 		case HAMMER2_BREF_TYPE_FREEMAP_LEAF:
+
 			hammer2_chain_setcheck(chain, chain->data);
 			break;
 		case HAMMER2_BREF_TYPE_DIRENT:
+
 			if (chain->bytes)
 				hammer2_chain_setcheck(chain, chain->data);
 			break;
 		case HAMMER2_BREF_TYPE_INODE:
+
 			if (chain->data->ipdata.meta.op_flags &
 			    HAMMER2_OPFLAG_PFSROOT) {
-				hammer2_inode_data_t *ipdata;
 
 				hammer2_io_setdirty(chain->dio);
 				ipdata = &chain->data->ipdata;
-				if (chain->pmp) {
+				if (chain->pmp)
 					ipdata->meta.pfs_inum =
-						chain->pmp->inode_tid;
-				}
+					    chain->pmp->inode_tid;
 			} else {
-			}
 
+			}
 			hammer2_chain_setcheck(chain, chain->data);
 			break;
 		default:
-			panic("hammer2_flush_core: unsupported "
-			      "embedded bref %d",
-			      chain->bref.type);
+			hpanic("bad blockref type %d", chain->bref.type);
+			break;
 		}
 
-		if (chain->flags & HAMMER2_CHAIN_DESTROY) {
-			hammer2_io_dedup_delete(hmp,
-						chain->bref.type,
-						chain->bref.data_off,
-						chain->bytes);
-#if 0
-			hammer2_io_t *dio;
-			if (chain->dio) {
-				hammer2_io_inval(chain->dio,
-						 chain->bref.data_off,
-						 chain->bytes);
-			} else if ((dio = hammer2_io_getquick(hmp,
-						  chain->bref.data_off,
-						  chain->bytes,
-						  1)) != NULL) {
-				hammer2_io_inval(dio,
-						 chain->bref.data_off,
-						 chain->bytes);
-				hammer2_io_putblk(&dio);
-			}
-#endif
-		}
+		if (chain->flags & HAMMER2_CHAIN_DESTROY)
+			hammer2_io_dedup_delete(hmp, chain->bref.type,
+			    chain->bref.data_off, chain->bytes);
 	}
 
 	if ((chain->flags & HAMMER2_CHAIN_UPDATE) && parent == NULL)
@@ -487,60 +405,53 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	    (flags & HAMMER2_FLUSH_FSSYNC) == 0 &&
 	    (flags & HAMMER2_FLUSH_ALL) == 0 &&
 	    chain->pmp && chain->pmp->mp) {
-#ifdef HAMMER2_DEBUG_SYNC
-		kprintf("inum %ld do not update parent, non-fssync\n",
-			(long)chain->bref.key);
-#endif
+		debug_hprintf("inum %016llx do not update parent, non-fssync\n",
+		    (long long)chain->bref.key);
 		goto skipupdate;
 	}
-#ifdef HAMMER2_DEBUG_SYNC
 	if (chain->bref.type == HAMMER2_BREF_TYPE_INODE)
-		kprintf("inum %ld update parent\n", (long)chain->bref.key);
-#endif
+		debug_hprintf("inum %016llx update parent\n",
+		    (long long)chain->bref.key);
 
 	if (chain->flags & HAMMER2_CHAIN_UPDATE) {
-		hammer2_blockref_t *base;
-		int count;
 
 		atomic_clear_int(&chain->flags, HAMMER2_CHAIN_UPDATE);
 
 		if (parent->flags & HAMMER2_CHAIN_DESTROY) {
-			if (parent->bref.modify_tid < chain->bref.modify_tid) {
+			if (parent->bref.modify_tid < chain->bref.modify_tid)
 				parent->bref.modify_tid =
-					chain->bref.modify_tid;
-			}
-			atomic_clear_int(&chain->flags, HAMMER2_CHAIN_BLKMAPPED |
-							HAMMER2_CHAIN_BLKMAPUPD);
+				    chain->bref.modify_tid;
+			atomic_clear_int(&chain->flags,
+			    HAMMER2_CHAIN_BLKMAPPED | HAMMER2_CHAIN_BLKMAPUPD);
 			goto skipupdate;
 		}
 
-		if (chain->bref.type == HAMMER2_BREF_TYPE_INDIRECT) {
+		if (chain->bref.type == HAMMER2_BREF_TYPE_INDIRECT)
 			if (hammer2_chain_indirect_maintenance(parent, chain))
 				goto skipupdate;
-		}
 
 		save_error = hammer2_chain_modify(parent, 0, 0, 0);
 		if (save_error) {
 			info->error |= save_error;
-			kprintf("hammer2_flush: %016jx.%02x error=%08x\n",
-				parent->bref.data_off, parent->bref.type,
-				save_error);
+			hprintf("%s parent %016llx/%d error %08x\n",
+			    hammer2_breftype_to_str(parent->bref.type),
+			    (long long)parent->bref.key, parent->bref.keybits,
+			    save_error);
 			atomic_set_int(&chain->flags, HAMMER2_CHAIN_UPDATE);
 			goto skipupdate;
 		}
 		if (parent->bref.modify_tid < chain->bref.modify_tid)
 			parent->bref.modify_tid = chain->bref.modify_tid;
 
-		switch(parent->bref.type) {
+		switch (parent->bref.type) {
 		case HAMMER2_BREF_TYPE_INODE:
+
 			if (parent->data &&
 			    (parent->data->ipdata.meta.op_flags &
-			     HAMMER2_OPFLAG_DIRECTDATA) == 0) {
-				base = &parent->data->
-					ipdata.u.blockset.blockref[0];
-			} else {
+			    HAMMER2_OPFLAG_DIRECTDATA) == 0)
+				base = &parent->data->ipdata.u.blockset.blockref[0];
+			else
 				base = NULL;
-			}
 			count = HAMMER2_SET_COUNT;
 			break;
 		case HAMMER2_BREF_TYPE_INDIRECT:
@@ -560,11 +471,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 			count = HAMMER2_SET_COUNT;
 			break;
 		default:
-			base = NULL;
-			count = 0;
-			panic("hammer2_flush_core: "
-			      "unrecognized blockref type: %d",
-			      parent->bref.type);
+			hpanic("bad blockref type %d", parent->bref.type);
 			break;
 		}
 
@@ -572,18 +479,20 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 			if (chain->flags & HAMMER2_CHAIN_BLKMAPPED) {
 				hammer2_spin_ex(&parent->core.spin);
 				hammer2_base_delete(parent, base, count, chain,
-						    NULL);
+				    NULL);
 				hammer2_spin_unex(&parent->core.spin);
+
 			} else {
 				atomic_clear_int(&chain->flags,
-						 HAMMER2_CHAIN_BLKMAPUPD);
+				    HAMMER2_CHAIN_BLKMAPUPD);
 			}
 		}
 		if (base && (chain->flags & HAMMER2_CHAIN_BLKMAPPED) == 0) {
 			hammer2_spin_ex(&parent->core.spin);
-			hammer2_base_insert(parent, base, count,
-					    chain, &chain->bref);
+			hammer2_base_insert(parent, base, count, chain,
+			    &chain->bref);
 			hammer2_spin_unex(&parent->core.spin);
+
 		}
 	}
 skipupdate:
@@ -593,7 +502,7 @@ skipupdate:
 done:
 	KKASSERT(chain->refs > 0);
 
-	return retry;
+	return (retry);
 }
 
 static int
@@ -619,13 +528,11 @@ hammer2_flush_recurse(hammer2_chain_t *child, void *data)
 	hammer2_chain_unlock(parent);
 	hammer2_chain_lock(child, HAMMER2_RESOLVE_MAYBE);
 	if (child->parent != parent) {
-		kprintf("LOST CHILD1 %p->%p (actual parent %p)\n",
-			parent, child, child->parent);
+		hprintf("lost child1\n");
 		goto done;
 	}
 	if (child->error) {
-		kprintf("CHILD ERROR DURING FLUSH LOCK %p->%p\n",
-			parent, child);
+		hprintf("child error %d during flush lock\n", child->error);
 		info->error |= child->error;
 		goto done;
 	}
@@ -636,17 +543,16 @@ hammer2_flush_recurse(hammer2_chain_t *child, void *data)
 	if (child->flags & HAMMER2_CHAIN_DESTROY)
 		++info->scan_del_count;
 #endif
+
 	if ((parent->bref.flags & HAMMER2_BREF_FLAG_PFSROOT) &&
 	    (child->flags & HAMMER2_CHAIN_DESTROY) == 0 &&
 	    parent->bref.type == HAMMER2_BREF_TYPE_INODE &&
-	    (info->flags & HAMMER2_FLUSH_FSSYNC) == 0) {
+	    (info->flags & HAMMER2_FLUSH_FSSYNC) == 0)
 		if ((child->bref.key & HAMMER2_DIRHASH_VISIBLE) == 0) {
-			if (child->flags & HAMMER2_CHAIN_FLUSH_MASK) {
+			if (child->flags & HAMMER2_CHAIN_FLUSH_MASK)
 				hammer2_chain_setflush(parent);
-			}
 			goto done;
 		}
-	}
 
 	if (child->flags & HAMMER2_CHAIN_FLUSH_MASK) {
 #ifdef HAMMER2_SCAN_DEBUG
@@ -659,12 +565,12 @@ hammer2_flush_recurse(hammer2_chain_t *child, void *data)
 	}
 
 done:
+
 	hammer2_chain_unlock(child);
 	hammer2_chain_lock(parent, HAMMER2_RESOLVE_MAYBE);
 	hammer2_chain_drop_unhold(parent);
 	if (parent->error) {
-		kprintf("PARENT ERROR DURING FLUSH LOCK %p->%p\n",
-			parent, child);
+		hprintf("parent error %d during flush lock\n", parent->error);
 		info->error |= parent->error;
 	}
 	hammer2_chain_drop(child);
@@ -675,21 +581,21 @@ done:
 }
 
 void
-hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
+hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch, int clindex)
 {
 	hammer2_xop_flush_t *xop = &arg->xop_flush;
-	hammer2_chain_t *chain;
-	hammer2_inode_t *ip;
 	hammer2_dev_t *hmp;
 	hammer2_pfs_t *pmp;
+	hammer2_chain_t *chain;
+	hammer2_inode_t *ip;
 	hammer2_devvp_t *e;
 	struct vnode *devvp;
-	int flush_error = 0;
-	int fsync_error = 0;
-	int total_error = 0;
-	int j;
-	int xflags;
-	int ispfsroot = 0;
+	struct g_consumer *cp;
+	struct buf *bp;
+	struct bio *bio;
+	int flush_error = 0, fsync_error = 0, total_error = 0, vol_error = 0;
+	int j, xflags, ispfsroot = 0;
+	daddr_t blkno;
 
 	xflags = HAMMER2_FLUSH_TOP;
 	if (xop->head.flags & HAMMER2_XOP_INODE_STOP)
@@ -703,6 +609,7 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 	if (chain) {
 		hmp = chain->hmp;
 		if (chain->flags & HAMMER2_CHAIN_FLUSH_MASK) {
+
 			if (chain->parent)
 				hammer2_chain_setflush(chain->parent);
 			hammer2_flush(chain, xflags);
@@ -710,18 +617,9 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 			if (ip == pmp->iroot && pmp != hmp->spmp) {
 				hammer2_spin_ex(&pmp->blockset_spin);
 				pmp->pfs_iroot_blocksets[clindex] =
-					chain->data->ipdata.u.blockset;
+				    chain->data->ipdata.u.blockset;
 				hammer2_spin_unex(&pmp->blockset_spin);
 			}
-
-#if 0
-			if ((xop->head.flags & HAMMER2_XOP_PARENTONFLUSH) ||
-			    chain->bref.type != HAMMER2_BREF_TYPE_INODE) {
-				parent = chain->parent;
-				if (parent)
-					hammer2_chain_setflush(parent);
-			}
-#endif
 		}
 		if (chain->flags & HAMMER2_CHAIN_PFSBOUNDARY)
 			ispfsroot = 1;
@@ -737,14 +635,12 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 	if (ispfsroot == 0)
 		goto skip;
 
-	for (j = clindex - 1; j >= 0; --j) {
-		if ((chain = ip->cluster.array[j].chain) != NULL) {
+	for (j = clindex - 1; j >= 0; --j)
+		if ((chain = ip->cluster.array[j].chain) != NULL)
 			if (chain->hmp == hmp) {
 				chain = NULL;
 				goto skip;
 			}
-		}
-	}
 	chain = NULL;
 
 	hammer2_trans_init(hmp->spmp, HAMMER2_TRANS_ISFLUSH);
@@ -754,11 +650,9 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 		if (chain) {
 			hammer2_chain_ref(chain);
 			hammer2_chain_lock(chain, HAMMER2_RESOLVE_ALWAYS);
-			flush_error |=
-				hammer2_flush(chain,
-					      HAMMER2_FLUSH_TOP |
-					      HAMMER2_FLUSH_INODE_STOP |
-					      HAMMER2_FLUSH_FSSYNC);
+			flush_error |= hammer2_flush(chain,
+			    HAMMER2_FLUSH_TOP | HAMMER2_FLUSH_INODE_STOP |
+			    HAMMER2_FLUSH_FSSYNC);
 			hammer2_chain_unlock(chain);
 			hammer2_chain_drop(chain);
 		}
@@ -769,6 +663,7 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 	hammer2_chain_ref(&hmp->fchain);
 	hammer2_chain_lock(&hmp->fchain, HAMMER2_RESOLVE_ALWAYS);
 	if (hmp->fchain.flags & HAMMER2_CHAIN_FLUSH_MASK) {
+
 		hammer2_voldata_modify(hmp);
 		chain = &hmp->fchain;
 		flush_error |= hammer2_flush(chain, HAMMER2_FLUSH_TOP);
@@ -787,33 +682,18 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 	hammer2_chain_unlock(&hmp->vchain);
 	hammer2_chain_drop(&hmp->vchain);
 
-	TAILQ_FOREACH(e, &hmp->devvpl, entry) {
-		devvp = e->devvp;
-		KKASSERT(devvp);
-		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
-		fsync_error = VOP_FSYNC(devvp, MNT_WAIT, 0);
-		vn_unlock(devvp);
-		if (fsync_error || flush_error) {
-			kprintf("hammer2: sync error fsync=%d h2flush=0x%04x dev=%s\n",
-				fsync_error, flush_error, e->path);
-		}
-	}
+	(void)e;
+	(void)devvp;
+	if (hmp->devvp)
+		sync_blockdev(hmp->devvp);
 
 	if (fsync_error == 0 && flush_error == 0 &&
 	    (hmp->vchain.flags & HAMMER2_CHAIN_VOLUMESYNC)) {
-		struct buf *bp;
-		int vol_error = 0;
 
-		bp = getpbuf(NULL);
-		bp->b_bio1.bio_offset = 0;
-		bp->b_bufsize = 0;
-		bp->b_bcount = 0;
-		bp->b_cmd = BUF_CMD_FLUSH;
-		bp->b_bio1.bio_done = biodone_sync;
-		bp->b_bio1.bio_flags |= BIO_SYNC;
-		vn_strategy(hmp->devvp, &bp->b_bio1);
-		fsync_error = biowait(&bp->b_bio1, "h2vol");
-		relpbuf(bp, NULL);
+		(void)cp;
+		(void)bio;
+		if (hmp->devvp)
+			blkdev_issue_flush(hmp->devvp);
 
 		j = hmp->volhdrno + 1;
 		if (j < 0)
@@ -821,23 +701,28 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, void *scratch __unused, int clindex)
 		if (j >= HAMMER2_NUM_VOLHDRS)
 			j = 0;
 		if (j * HAMMER2_ZONE_BYTES64 + HAMMER2_SEGSIZE >
-		    hmp->volsync.volu_size) {
+		    hmp->volsync.volu_size)
 			j = 0;
+		debug_hprintf("sync volhdr %d size %016llx\n",
+		    j, (long long)hmp->volsync.volu_size);
+
+		(void)blkno;
+		(void)bp;
+		if (hmp->devvp) {
+			int werr = hammer2_dev_bwrite(hmp->devvp,
+			    (loff_t)j * HAMMER2_ZONE_BYTES64,
+			    &hmp->volsync, HAMMER2_VOLUME_BYTES, 1);
+			if (werr)
+				hprintf("volume header %d write failed: %d\n",
+				    j, werr);
+			else {
+				sync_blockdev(hmp->devvp);
+
+				blkdev_issue_flush(hmp->devvp);
+			}
 		}
-		if (hammer2_debug & 0x8000) {
-			kprintf("sync volhdr %d %jd\n",
-				j, (intmax_t)hmp->volsync.volu_size);
-		}
-		bp = getblk(hmp->devvp, j * HAMMER2_ZONE_BYTES64,
-			    HAMMER2_VOLUME_BYTES, GETBLK_KVABIO, 0);
-		atomic_clear_int(&hmp->vchain.flags,
-				 HAMMER2_CHAIN_VOLUMESYNC);
-		bkvasync(bp);
-		bcopy(&hmp->volsync, bp->b_data, HAMMER2_VOLUME_BYTES);
-		vol_error = bwrite(bp);
+		atomic_clear_int(&hmp->vchain.flags, HAMMER2_CHAIN_VOLUMESYNC);
 		hmp->volhdrno = j;
-		if (vol_error)
-			fsync_error = vol_error;
 	}
 	if (flush_error)
 		total_error = flush_error;

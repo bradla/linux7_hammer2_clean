@@ -1,5 +1,10 @@
 #include "hammer2.h"
 
+int hammer2_debug = 0;
+module_param(hammer2_debug, int, 0644);
+MODULE_PARM_DESC(hammer2_debug,
+	"HAMMER2 debug mask (bit 0x0100 = RXSPAN trace of received LNK_SPANs)");
+
 typedef struct hammer2_deferred_ip {
 	struct hammer2_deferred_ip *next;
 	hammer2_inode_t	*ip;
@@ -89,6 +94,7 @@ hammer2_primary_sync_thread(void *arg)
 		if (thr->flags & HAMMER2_THREAD_REMASTER) {
 			nflags = flags & ~HAMMER2_THREAD_REMASTER;
 			if (atomic_cmpset_int(&thr->flags, flags, nflags)) {
+
 			}
 			continue;
 		}
@@ -102,6 +108,7 @@ hammer2_primary_sync_thread(void *arg)
 
 		for (;;) {
 			int didbreak = 0;
+
 			error = hammer2_sync_slaves(thr, pmp->iroot, &list, 1);
 			if (hammer2_debug & 0x8000) {
 				kprintf("sync_slaves error %d defer %p\n",
@@ -128,7 +135,7 @@ hammer2_primary_sync_thread(void *arg)
 				if (defer == list.base) {
 					--list.count;
 					list.base = defer->next;
-					kfree(defer, M_HAMMER2);
+					hfree(defer, M_HAMMER2, sizeof(*defer));
 					defer = NULL;
 					hammer2_inode_drop(nip);
 				}
@@ -141,7 +148,7 @@ hammer2_primary_sync_thread(void *arg)
 					--list.count;
 					hammer2_inode_drop(defer->ip);
 					list.base = defer->next;
-					kfree(defer, M_HAMMER2);
+					hfree(defer, M_HAMMER2, sizeof(*defer));
 				}
 				if (error == 0 || error == HAMMER2_ERROR_EAGAIN)
 					error = HAMMER2_ERROR_EINPROGRESS;
@@ -163,9 +170,11 @@ hammer2_primary_sync_thread(void *arg)
 	}
 	thr->td = NULL;
 	hammer2_thr_signal(thr, HAMMER2_THREAD_STOPPED);
+
 }
 
 #if 0
+
 static
 void
 hammer2_update_pfs_status(hammer2_thread_t *thr, uint32_t flags)
@@ -275,6 +284,7 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 	parent = NULL;
 
 #if 0
+
 	if (pmp->cluster_flags & HAMMER2_CLUSTER_SSYNCED)
 		return(0);
 	if ((pmp->cluster_flags & HAMMER2_CLUSTER_RDHARD) == 0)
@@ -346,6 +356,7 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 	}
 
 	for (;;) {
+
 		int advance_local = 0;
 		int advance_xop = 0;
 		int dodefer = 0;
@@ -357,21 +368,26 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 			break;
 
 		if (chain && merror == HAMMER2_ERROR_ENOENT) {
+
 			n = -1;
 			focus = NULL;
 		} else if (chain == NULL) {
+
 			n = 1;
 			focus = xop->head.cluster.focus;
 		} else {
+
 			focus = xop->head.cluster.focus;
 			n = hammer2_chain_cmp(chain, focus);
 		}
 
 		if (n < 0) {
+
 			nerror = hammer2_sync_destroy(thr, &parent, &chain,
 						      0, idx);
 		} else if (n == 0 && chain->bref.modify_tid !=
 				     focus->bref.modify_tid) {
+
 			if (focus->bref.type == HAMMER2_BREF_TYPE_INODE) {
 				nerror = hammer2_sync_replace(
 						thr, parent, chain,
@@ -387,10 +403,12 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 			advance_local = 1;
 			advance_xop = 1;
 		} else if (n == 0) {
+
 			advance_local = 1;
 			advance_xop = 1;
 			nerror = 0;
 		} else if (n > 0) {
+
 			if (focus->bref.type == HAMMER2_BREF_TYPE_INODE) {
 				nerror = hammer2_sync_insert(
 						thr, &parent, &chain,
@@ -413,7 +431,7 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 
 			KKASSERT(focus->bref.type == HAMMER2_BREF_TYPE_INODE);
 
-			defer = kmalloc(sizeof(*defer), M_HAMMER2,
+			defer = hmalloc(sizeof(*defer), M_HAMMER2,
 					M_WAITOK | M_ZERO);
 			KKASSERT(xop->head.cluster.array[idx].chain == NULL);
 			xop->head.cluster.array[idx].flags =
@@ -440,7 +458,7 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 		}
 		if (advance_local) {
 			chain = hammer2_chain_next(&parent, chain, &key_next,
-						   key_next, HAMMER2_KEY_MAX,
+						   HAMMER2_KEY_MAX,
 						   &serror,
 						   HAMMER2_LOOKUP_SHARED |
 						   HAMMER2_LOOKUP_NODIRECT |
@@ -475,7 +493,8 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 			if ((hammer2_debug & 0x8000) && focus) {
 				const char *filename;
 
-				filename = hammer2_xop_gdata(&xop2->head)->
+				filename = ((const hammer2_media_data_t *)
+					hammer2_xop_gdata(&xop2->head))->
 						ipdata.filename;
 				kprintf("syncthr: update inode %p (%s)\n",
 					focus, filename);
@@ -495,6 +514,7 @@ hammer2_sync_slaves(hammer2_thread_t *thr, hammer2_inode_t *ip,
 			hammer2_chain_drop(chain);
 			hammer2_chain_unlock(parent);
 			hammer2_chain_drop(parent);
+
 		}
 		hammer2_xop_retire(&xop2->head, HAMMER2_XOPMASK_VOP);
 	}
@@ -552,7 +572,9 @@ hammer2_sync_insert(hammer2_thread_t *thr,
 			goto failed;
 
 		chain->bref.methods = focus->bref.methods;
+
 		chain->bref.vradix = focus->bref.vradix;
+
 		KKASSERT(chain->bref.modify_tid == mtid);
 		chain->bref.flags = focus->bref.flags;
 
@@ -562,12 +584,14 @@ hammer2_sync_insert(hammer2_thread_t *thr,
 
 			if ((data->ipdata.meta.op_flags &
 			     HAMMER2_OPFLAG_DIRECTDATA) == 0) {
+
 				bcopy(data, chain->data,
 				      offsetof(hammer2_inode_data_t, u));
 				hammer2_xop_pdata(xop);
 				break;
 			}
 			hammer2_xop_pdata(xop);
+
 		case HAMMER2_BREF_TYPE_DATA:
 			data = hammer2_xop_gdata(xop);
 			bcopy(data, chain->data, chain->bytes);
@@ -575,6 +599,7 @@ hammer2_sync_insert(hammer2_thread_t *thr,
 			hammer2_xop_pdata(xop);
 			break;
 		case HAMMER2_BREF_TYPE_DIRENT:
+
 			if (chain->bytes) {
 				data = hammer2_xop_gdata(xop);
 				bcopy(data, chain->data, chain->bytes);
@@ -680,6 +705,7 @@ hammer2_sync_replace(hammer2_thread_t *thr,
 		const hammer2_media_data_t *data;
 
 		if (chain->bytes != focus->bytes) {
+
 			nradix = hammer2_getradix(chain->bytes);
 			error = hammer2_chain_resize(chain, mtid, 0, nradix, 0);
 			if (error)
@@ -694,11 +720,13 @@ hammer2_sync_replace(hammer2_thread_t *thr,
 		chain->bref.methods = focus->bref.methods;
 		chain->bref.keybits = focus->bref.keybits;
 		chain->bref.vradix = focus->bref.vradix;
+
 		KKASSERT(mtid == 0 || chain->bref.modify_tid == mtid);
 		chain->bref.flags = focus->bref.flags;
 
 		switch(chain->bref.type) {
 		case HAMMER2_BREF_TYPE_INODE:
+
 			if (isroot) {
 				chain->data->ipdata.meta.uflags =
 					data->ipdata.meta.uflags;
@@ -712,6 +740,7 @@ hammer2_sync_replace(hammer2_thread_t *thr,
 					data->ipdata.meta.mtime;
 				chain->data->ipdata.meta.atime =
 					data->ipdata.meta.atime;
+
 				chain->data->ipdata.meta.uid =
 					data->ipdata.meta.uid;
 				chain->data->ipdata.meta.gid =
@@ -741,6 +770,7 @@ hammer2_sync_replace(hammer2_thread_t *thr,
 
 			if ((data->ipdata.meta.op_flags &
 			     HAMMER2_OPFLAG_DIRECTDATA) == 0) {
+
 				if (otype != HAMMER2_BREF_TYPE_INODE ||
 				    (chain->data->ipdata.meta.op_flags &
 				     HAMMER2_OPFLAG_DIRECTDATA)) {
@@ -751,14 +781,17 @@ hammer2_sync_replace(hammer2_thread_t *thr,
 				}
 				bcopy(data, chain->data,
 				      offsetof(hammer2_inode_data_t, u));
+
 				hammer2_chain_setcheck(chain, chain->data);
 				break;
 			}
+
 		case HAMMER2_BREF_TYPE_DATA:
 			bcopy(data, chain->data, chain->bytes);
 			hammer2_chain_setcheck(chain, chain->data);
 			break;
 		case HAMMER2_BREF_TYPE_DIRENT:
+
 			if (chain->bytes) {
 				bcopy(data, chain->data, chain->bytes);
 				hammer2_chain_setcheck(chain, chain->data);

@@ -1,18 +1,5 @@
-#ifndef _SYS_CCMS_H_
-#define _SYS_CCMS_H_
-
-#ifndef _SYS_TYPES_H_
-#include <sys/types.h>
-#endif
-#ifndef _SYS_PARAM_H_
-#include <sys/param.h>
-#endif
-#ifndef _SYS_SERIALIZE_H_
-#include <sys/serialize.h>
-#endif
-#ifndef _SYS_SPINLOCK_H_
-#include <sys/spinlock.h>
-#endif
+#ifndef _HAMMER2_CCMS_H_
+#define _HAMMER2_CCMS_H_
 
 typedef uint64_t	ccms_key_t;
 typedef uint64_t	ccms_tid_t;
@@ -47,8 +34,6 @@ struct ccms_cst {
 
 typedef struct ccms_cst		ccms_cst_t;
 
-#ifdef _KERNEL
-
 void ccms_cst_init(ccms_cst_t *cst);
 void ccms_cst_uninit(ccms_cst_t *cst);
 
@@ -62,7 +47,5 @@ void ccms_thread_unlock(ccms_cst_t *cst);
 void ccms_thread_unlock_upgraded(ccms_cst_t *cst, ccms_state_t ostate);
 int ccms_thread_lock_owned(ccms_cst_t *cst);
 void ccms_thread_lock_setown(ccms_cst_t *cst);
-
-#endif
 
 #endif

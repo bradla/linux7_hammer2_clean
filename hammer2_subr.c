@@ -1,16 +1,13 @@
-#include <sys/cdefs.h>
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/types.h>
-#include <sys/uuid.h>
-#include <sys/dirent.h>
-
 #include "hammer2.h"
+#include <linux/time.h>
+#include <linux/ktime.h>
+#include <linux/signal.h>
+#include <linux/sched/signal.h>
 
 int
 hammer2_get_dtype(uint8_t type)
 {
-	switch(type) {
+	switch (type) {
 	case HAMMER2_OBJTYPE_UNKNOWN:
 		return (DT_UNKNOWN);
 	case HAMMER2_OBJTYPE_DIRECTORY:
@@ -32,12 +29,13 @@ hammer2_get_dtype(uint8_t type)
 	default:
 		return (DT_UNKNOWN);
 	}
+
 }
 
 int
 hammer2_get_vtype(uint8_t type)
 {
-	switch(type) {
+	switch (type) {
 	case HAMMER2_OBJTYPE_UNKNOWN:
 		return (VBAD);
 	case HAMMER2_OBJTYPE_DIRECTORY:
@@ -59,56 +57,59 @@ hammer2_get_vtype(uint8_t type)
 	default:
 		return (VBAD);
 	}
+
 }
 
 uint8_t
-hammer2_get_obj_type(enum vtype vtype)
+hammer2_get_obj_type(uint8_t vtype)
 {
-	switch(vtype) {
+	switch (vtype) {
 	case VDIR:
-		return(HAMMER2_OBJTYPE_DIRECTORY);
+		return (HAMMER2_OBJTYPE_DIRECTORY);
 	case VREG:
-		return(HAMMER2_OBJTYPE_REGFILE);
+		return (HAMMER2_OBJTYPE_REGFILE);
 	case VFIFO:
-		return(HAMMER2_OBJTYPE_FIFO);
+		return (HAMMER2_OBJTYPE_FIFO);
 	case VSOCK:
-		return(HAMMER2_OBJTYPE_SOCKET);
+		return (HAMMER2_OBJTYPE_SOCKET);
 	case VCHR:
-		return(HAMMER2_OBJTYPE_CDEV);
+		return (HAMMER2_OBJTYPE_CDEV);
 	case VBLK:
-		return(HAMMER2_OBJTYPE_BDEV);
+		return (HAMMER2_OBJTYPE_BDEV);
 	case VLNK:
-		return(HAMMER2_OBJTYPE_SOFTLINK);
+		return (HAMMER2_OBJTYPE_SOFTLINK);
 	default:
-		return(HAMMER2_OBJTYPE_UNKNOWN);
+		return (HAMMER2_OBJTYPE_UNKNOWN);
 	}
+
 }
 
 void
-hammer2_time_to_timespec(uint64_t xtime, struct timespec *ts)
+hammer2_time_to_timespec(uint64_t xtime, struct timespec64 *ts)
 {
 	ts->tv_sec = (unsigned long)(xtime / 1000000);
 	ts->tv_nsec = (unsigned int)(xtime % 1000000) * 1000L;
 }
 
 uint64_t
-hammer2_timespec_to_time(const struct timespec *ts)
+hammer2_timespec_to_time(const struct timespec64 *ts)
 {
 	uint64_t xtime;
 
 	xtime = (unsigned)(ts->tv_nsec / 1000) +
-		(unsigned long)ts->tv_sec * 1000000ULL;
-	return(xtime);
+	    (unsigned long)ts->tv_sec * 1000000ULL;
+
+	return (xtime);
 }
 
 uint32_t
-hammer2_to_unix_xid(const uuid_t *uuid)
+hammer2_to_unix_xid(const struct uuid *uuid)
 {
-	return(*(const uint32_t *)&uuid->node[2]);
+	return (*(const uint32_t *)&uuid->node[2]);
 }
 
 void
-hammer2_guid_to_uuid(uuid_t *uuid, uint32_t guid)
+hammer2_guid_to_uuid(struct uuid *uuid, uint32_t guid)
 {
 	bzero(uuid, sizeof(*uuid));
 	*(uint32_t *)&uuid->node[2] = guid;
@@ -119,8 +120,7 @@ hammer2_dirhash(const char *aname, size_t len)
 {
 	uint32_t crcx;
 	uint64_t key;
-	size_t i;
-	size_t j;
+	size_t i, j;
 
 	key = 0;
 
@@ -171,23 +171,27 @@ hammer2_getradix(size_t bytes)
 
 int
 hammer2_calc_logical(hammer2_inode_t *ip, hammer2_off_t uoff,
-		     hammer2_key_t *lbasep, hammer2_key_t *leofp)
+    hammer2_key_t *lbasep, hammer2_key_t *leofp)
 {
 	if (lbasep)
 		*lbasep = uoff & ~HAMMER2_PBUFMASK64;
-	if (leofp) {
+	if (leofp)
 		*leofp = (ip->meta.size + HAMMER2_PBUFMASK64) &
-			 ~HAMMER2_PBUFMASK64;
-	}
+		    ~HAMMER2_PBUFMASK64;
+
 	return (HAMMER2_PBUFSIZE);
+}
+
+int
+hammer2_get_logical(void)
+{
+	return (hammer2_calc_logical(NULL, 0, NULL, NULL));
 }
 
 int
 hammer2_calc_physical(hammer2_inode_t *ip, hammer2_key_t lbase)
 {
-	int lblksize;
-	int pblksize;
-	int eofbytes;
+	int lblksize, pblksize, eofbytes;
 
 	lblksize = hammer2_calc_logical(ip, lbase, NULL, NULL);
 	if (lbase + lblksize <= ip->meta.size)
@@ -206,162 +210,133 @@ hammer2_calc_physical(hammer2_inode_t *ip, hammer2_key_t lbase)
 void
 hammer2_update_time(uint64_t *timep)
 {
-	struct timespec ts;
+	struct timespec64 ts;
 
-	vfs_timestamp(&ts);
+	ktime_get_real_ts64(&ts);
 	*timep = (unsigned long)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 void
-hammer2_adjreadcounter(int btype, size_t bytes)
+hammer2_inc_iostat(hammer2_iostat_t *ios, int btype, size_t bytes)
 {
-	long *counterp;
-
-	switch(btype) {
-	case HAMMER2_BREF_TYPE_DATA:
-		counterp = &hammer2_iod_file_read;
-		break;
-	case HAMMER2_BREF_TYPE_DIRENT:
+	hammer2_iostat_unit_t *p = NULL;
+#ifdef HAMMER2_INVARIANTS
+	switch (btype) {
 	case HAMMER2_BREF_TYPE_INODE:
-		counterp = &hammer2_iod_meta_read;
+		p = &ios->inode;
 		break;
 	case HAMMER2_BREF_TYPE_INDIRECT:
-		counterp = &hammer2_iod_indr_read;
+		p = &ios->indirect;
+		break;
+	case HAMMER2_BREF_TYPE_DATA:
+		p = &ios->data;
+		break;
+	case HAMMER2_BREF_TYPE_DIRENT:
+		p = &ios->dirent;
 		break;
 	case HAMMER2_BREF_TYPE_FREEMAP_NODE:
+		p = &ios->freemap_node;
+		break;
 	case HAMMER2_BREF_TYPE_FREEMAP_LEAF:
-		counterp = &hammer2_iod_fmap_read;
+		p = &ios->freemap_leaf;
 		break;
 	case HAMMER2_BREF_TYPE_FREEMAP:
-	case HAMMER2_BREF_TYPE_VOLUME:
-		counterp = &hammer2_iod_volu_read;
+		p = &ios->freemap;
 		break;
-	case HAMMER2_BREF_TYPE_EMPTY:
+	case HAMMER2_BREF_TYPE_VOLUME:
+		p = &ios->volume;
+		break;
 	default:
-		return;
+		KKASSERT(0);
+		break;
 	}
-	*counterp += bytes;
+#endif
+	if (p) {
+		KKASSERT(bytes > 0);;
+		p->count++;
+		p->bytes += bytes;
+	}
 }
 
 void
-hammer2_adjwritecounter(int btype, size_t bytes)
+hammer2_print_iostat(const hammer2_iostat_t *ios, const char *msg)
 {
-	long *counterp;
+	debug_hprintf("iostat %s count: "
+	    "inode %lu indirect %lu data %lu dirent %lu freemap_node %lu "
+	    "freemap_leaf %lu freemap %lu volume %lu\n",
+	    msg, ios->inode.count, ios->indirect.count, ios->data.count,
+	    ios->dirent.count, ios->freemap_node.count, ios->freemap_leaf.count,
+	    ios->freemap.count, ios->volume.count);
 
-	switch(btype) {
-	case HAMMER2_BREF_TYPE_DATA:
-		counterp = &hammer2_iod_file_write;
-		break;
-	case HAMMER2_BREF_TYPE_DIRENT:
-	case HAMMER2_BREF_TYPE_INODE:
-		counterp = &hammer2_iod_meta_write;
-		break;
-	case HAMMER2_BREF_TYPE_INDIRECT:
-		counterp = &hammer2_iod_indr_write;
-		break;
-	case HAMMER2_BREF_TYPE_FREEMAP_NODE:
-	case HAMMER2_BREF_TYPE_FREEMAP_LEAF:
-		counterp = &hammer2_iod_fmap_write;
-		break;
-	case HAMMER2_BREF_TYPE_FREEMAP:
-	case HAMMER2_BREF_TYPE_VOLUME:
-		counterp = &hammer2_iod_volu_write;
-		break;
-	case HAMMER2_BREF_TYPE_EMPTY:
-	default:
-		return;
-	}
-	*counterp += bytes;
+	debug_hprintf("iostat %s bytes: "
+	    "inode %lx indirect %lx data %lx dirent %lx freemap_node %lx "
+	    "freemap_leaf %lx freemap %lx volume %lx\n",
+	    msg, ios->inode.bytes, ios->indirect.bytes, ios->data.bytes,
+	    ios->dirent.bytes, ios->freemap_node.bytes, ios->freemap_leaf.bytes,
+	    ios->freemap.bytes, ios->volume.bytes);
 }
 
 int
-hammer2_signal_check(time_t *timep)
+hammer2_signal_check(void)
 {
-	thread_t td = curthread;
-	int error = 0;
-
-	if (td->td_lwp) {
-		lwkt_user_yield();
-		if (*timep != time_second) {
-			*timep = time_second;
-			if (CURSIG_NOBLOCK(curthread->td_lwp) != 0)
-				error = HAMMER2_ERROR_ABORTED;
-		}
-	} else {
-		lwkt_yield();
-	}
-	return error;
+	if (signal_pending(current))
+		return SIGINT;
+	return 0;
 }
 
 const char *
-hammer2_error_str(int error)
+hammer2_breftype_to_str(uint8_t type)
 {
-	if (error & HAMMER2_ERROR_EIO)
-		return("I/O Error");
-	if (error & HAMMER2_ERROR_CHECK)
-		return("Check Error");
-	if (error & HAMMER2_ERROR_INCOMPLETE)
-		return("Cluster Quorum Error");
-	if (error & HAMMER2_ERROR_DEPTH)
-		return("Chain Depth Error");
-	if (error & HAMMER2_ERROR_BADBREF)
-		return("Bad Blockref Error");
-	if (error & HAMMER2_ERROR_ENOSPC)
-		return("No Space on Device");
-	if (error & HAMMER2_ERROR_ENOENT)
-		return("Entry Not Found");
-	if (error & HAMMER2_ERROR_ENOTEMPTY)
-		return("Directory Not Empty");
-	if (error & HAMMER2_ERROR_EAGAIN)
-		return("EAGAIN");
-	if (error & HAMMER2_ERROR_ENOTDIR)
-		return("Not a Directory");
-	if (error & HAMMER2_ERROR_EISDIR)
-		return("Is a Directory");
-	if (error & HAMMER2_ERROR_EINPROGRESS)
-		return("Operation in Progress");
-	if (error & HAMMER2_ERROR_ABORTED)
-		return("Operation Aborted");
-	if (error & HAMMER2_ERROR_EOF)
-		return("Operation Complete");
-	if (error & HAMMER2_ERROR_EINVAL)
-		return("Invalid Operation");
-	if (error & HAMMER2_ERROR_EEXIST)
-		return("Object Exists");
-	if (error & HAMMER2_ERROR_EDEADLK)
-		return("Deadlock Detected");
-	if (error & HAMMER2_ERROR_ESRCH)
-		return("Object Not Found");
-	if (error & HAMMER2_ERROR_ETIMEDOUT)
-		return("Timeout");
-	return("Unknown Error");
-}
-
-const char *
-hammer2_bref_type_str(int btype)
-{
-	switch(btype) {
+	switch (type) {
 	case HAMMER2_BREF_TYPE_EMPTY:
-		return("empty");
+		return ("empty");
 	case HAMMER2_BREF_TYPE_INODE:
-		return("inode");
+		return ("inode");
 	case HAMMER2_BREF_TYPE_INDIRECT:
-		return("indirect");
+		return ("indirect");
 	case HAMMER2_BREF_TYPE_DATA:
-		return("data");
+		return ("data");
 	case HAMMER2_BREF_TYPE_DIRENT:
-		return("dirent");
+		return ("dirent");
 	case HAMMER2_BREF_TYPE_FREEMAP_NODE:
-		return("freemap_node");
+		return ("freemap_node");
 	case HAMMER2_BREF_TYPE_FREEMAP_LEAF:
-		return("freemap_leaf");
+		return ("freemap_leaf");
 	case HAMMER2_BREF_TYPE_INVALID:
-		return("invalid");
+		return ("invalid");
 	case HAMMER2_BREF_TYPE_FREEMAP:
-		return("freemap");
+		return ("freemap");
 	case HAMMER2_BREF_TYPE_VOLUME:
-		return("volume");
+		return ("volume");
 	default:
-		return("unknown");
+		return ("unknown");
 	}
+}
+
+uid_t
+hammer2_inode_to_uid(const hammer2_inode_t *ip)
+{
+	return (hammer2_to_unix_xid(&ip->meta.uid));
+}
+
+gid_t
+hammer2_inode_to_gid(const hammer2_inode_t *ip)
+{
+	return (hammer2_to_unix_xid(&ip->meta.gid));
+}
+
+static int32_t
+makeudev(int x, int y)
+{
+	if ((x & 0xffffff00) || (y & 0x0000ff00))
+		return (-1);
+	return ((x << 8) | y);
+}
+
+int
+hammer2_getnewfsid(void *mp)
+{
+	(void)mp;
+	(void)makeudev;
+	return 0;
 }

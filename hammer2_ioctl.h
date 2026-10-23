@@ -1,18 +1,14 @@
-#ifndef _VFS_HAMMER2_IOCTL_H_
-#define _VFS_HAMMER2_IOCTL_H_
+#ifndef _HAMMER2_IOCTL_H_
+#define _HAMMER2_IOCTL_H_
 
-#include <sys/param.h>
-#include <sys/syslimits.h>
+#include <linux/types.h>
+#include <linux/ioctl.h>
+#include <linux/limits.h>
 
-#ifndef _SYS_IOCCOM_H_
-#include <sys/ioccom.h>
-#endif
-#ifndef _VFS_HAMMER2_DISK_H_
 #include "hammer2_disk.h"
-#endif
-#ifndef _VFS_HAMMER2_MOUNT_H_
-#include "hammer2_mount.h"
-#endif
+
+#define HAMMER2_PATH_MAX	PATH_MAX
+#define HAMMER2_NAME_MAX	NAME_MAX
 
 struct hammer2_ioc_version {
 	int			version;
@@ -28,30 +24,18 @@ struct hammer2_ioc_recluster {
 
 typedef struct hammer2_ioc_recluster hammer2_ioc_recluster_t;
 
-struct hammer2_ioc_remote {
-	int			copyid;
-	int			nextid;
-	int			fd;
-	int			reserved03;
-	int			reserved04[8];
-	hammer2_volconf_t	copy1;
-	hammer2_volconf_t	copy2;
-};
-
-typedef struct hammer2_ioc_remote hammer2_ioc_remote_t;
-
 struct hammer2_ioc_pfs {
-	hammer2_key_t		name_key;
-	hammer2_key_t		name_next;
-	uint8_t			pfs_type;
-	uint8_t			pfs_subtype;
-	uint8_t			reserved0012;
-	uint8_t			reserved0013;
-	uint32_t		pfs_flags;
-	uint64_t		reserved0018;
-	uuid_t			pfs_fsid;
-	uuid_t			pfs_clid;
-	char			name[NAME_MAX+1];
+	u64			name_key;
+	u64			name_next;
+	u8			pfs_type;
+	u8			pfs_subtype;
+	u8			reserved0012;
+	u8			reserved0013;
+	u32			pfs_flags;
+	u64			reserved0018;
+	struct uuid		pfs_fsid;
+	struct uuid		pfs_clid;
+	char			name[NAME_MAX + 1];
 };
 
 typedef struct hammer2_ioc_pfs hammer2_ioc_pfs_t;
@@ -59,10 +43,10 @@ typedef struct hammer2_ioc_pfs hammer2_ioc_pfs_t;
 #define HAMMER2_PFSFLAGS_NOSYNC		0x00000001
 
 struct hammer2_ioc_inode {
-	uint32_t		flags;
+	u32			flags;
 	void			*unused;
-	hammer2_key_t		data_count;
-	hammer2_key_t		inode_count;
+	u64			data_count;
+	u64			inode_count;
 	hammer2_inode_data_t	ip_data;
 };
 
@@ -75,30 +59,34 @@ typedef struct hammer2_ioc_inode hammer2_ioc_inode_t;
 #define HAMMER2IOC_INODE_FLAG_COMP	0x00000010
 
 struct hammer2_ioc_bulkfree {
-	hammer2_off_t		sbase;
-	hammer2_off_t		sstop;
+	u64			sbase;
+	u64			sstop;
 	size_t			size;
-	hammer2_off_t		count_allocated;
-	hammer2_off_t		count_freed;
-	hammer2_off_t		total_fragmented;
-	hammer2_off_t		total_allocated;
-	hammer2_off_t		total_scanned;
+	u64			count_allocated;
+	u64			count_freed;
+	u64			total_fragmented;
+	u64			total_allocated;
+	u64			total_scanned;
 };
 
 typedef struct hammer2_ioc_bulkfree hammer2_ioc_bulkfree_t;
 
+#define HAMMER2_INODE_MAXNAME	256
+
 struct hammer2_ioc_destroy {
-	enum { HAMMER2_DELETE_NOP,
-	       HAMMER2_DELETE_FILE,
-	       HAMMER2_DELETE_INUM } cmd;
+	enum {
+		HAMMER2_DELETE_NOP,
+		HAMMER2_DELETE_FILE,
+		HAMMER2_DELETE_INUM
+	} cmd;
 	char			path[HAMMER2_INODE_MAXNAME];
-	hammer2_key_t		inum;
+	u64			inum;
 };
 
 typedef struct hammer2_ioc_destroy hammer2_ioc_destroy_t;
 
 struct hammer2_ioc_growfs {
-	hammer2_off_t		size;
+	u64			size;
 	int			modified;
 	int			unused01;
 	int			unusedary[14];
@@ -107,16 +95,16 @@ struct hammer2_ioc_growfs {
 typedef struct hammer2_ioc_growfs hammer2_ioc_growfs_t;
 
 struct hammer2_ioc_volume {
-	char			path[MAXPATHLEN];
+	char			path[HAMMER2_PATH_MAX];
 	int			id;
-	hammer2_off_t		offset;
-	hammer2_off_t		size;
+	u64			offset;
+	u64			size;
 };
 
 typedef struct hammer2_ioc_volume hammer2_ioc_volume_t;
 
 struct hammer2_ioc_volume_list {
-	hammer2_ioc_volume_t	*volumes;
+	struct hammer2_ioc_volume __user *volumes;
 	int			nvolumes;
 	int			version;
 	char			pfs_name[HAMMER2_INODE_MAXNAME];
@@ -124,32 +112,57 @@ struct hammer2_ioc_volume_list {
 
 typedef struct hammer2_ioc_volume_list hammer2_ioc_volume_list_t;
 
-#define HAMMER2IOC_VERSION_GET	_IOWR('h', 64, struct hammer2_ioc_version)
-#define HAMMER2IOC_RECLUSTER	_IOWR('h', 65, struct hammer2_ioc_recluster)
+struct hammer2_ioc_volume2 {
+	char			path[64];
+	int			id;
+	u64			offset;
+	u64			size;
+};
 
-#define HAMMER2IOC_REMOTE_SCAN	_IOWR('h', 68, struct hammer2_ioc_remote)
-#define HAMMER2IOC_REMOTE_ADD	_IOWR('h', 69, struct hammer2_ioc_remote)
-#define HAMMER2IOC_REMOTE_DEL	_IOWR('h', 70, struct hammer2_ioc_remote)
-#define HAMMER2IOC_REMOTE_REP	_IOWR('h', 71, struct hammer2_ioc_remote)
+typedef struct hammer2_ioc_volume2 hammer2_ioc_volume2_t;
 
-#define HAMMER2IOC_SOCKET_GET	_IOWR('h', 76, struct hammer2_ioc_remote)
-#define HAMMER2IOC_SOCKET_SET	_IOWR('h', 77, struct hammer2_ioc_remote)
+struct hammer2_ioc_volume_list2 {
+	struct hammer2_ioc_volume2	volumes[HAMMER2_MAX_VOLUMES];
+	int			nvolumes;
+	int			version;
+	char			pfs_name[HAMMER2_INODE_MAXNAME];
+};
 
-#define HAMMER2IOC_PFS_GET	_IOWR('h', 80, struct hammer2_ioc_pfs)
-#define HAMMER2IOC_PFS_CREATE	_IOWR('h', 81, struct hammer2_ioc_pfs)
-#define HAMMER2IOC_PFS_DELETE	_IOWR('h', 82, struct hammer2_ioc_pfs)
-#define HAMMER2IOC_PFS_LOOKUP	_IOWR('h', 83, struct hammer2_ioc_pfs)
-#define HAMMER2IOC_PFS_SNAPSHOT	_IOWR('h', 84, struct hammer2_ioc_pfs)
+typedef struct hammer2_ioc_volume_list2 hammer2_ioc_volume_list2_t;
 
-#define HAMMER2IOC_INODE_GET	_IOWR('h', 86, struct hammer2_ioc_inode)
-#define HAMMER2IOC_INODE_SET	_IOWR('h', 87, struct hammer2_ioc_inode)
+#define HAMMER2_IOC(type, nr, struct) \
+	_IOC(_IOC_READ|_IOC_WRITE, type, nr, sizeof(struct))
 
-#define HAMMER2IOC_DEBUG_DUMP	_IOWR('h', 91, int)
-#define HAMMER2IOC_BULKFREE_SCAN _IOWR('h', 92, struct hammer2_ioc_bulkfree)
-#define HAMMER2IOC_BULKFREE_ASYNC _IOWR('h', 93, struct hammer2_ioc_bulkfree)
-#define HAMMER2IOC_DESTROY	_IOWR('h', 94, struct hammer2_ioc_destroy)
-#define HAMMER2IOC_EMERG_MODE	_IOWR('h', 95, int)
-#define HAMMER2IOC_GROWFS	_IOWR('h', 96, struct hammer2_ioc_growfs)
-#define HAMMER2IOC_VOLUME_LIST	_IOWR('h', 97, struct hammer2_ioc_volume_list)
+#define HAMMER2_IOR(type, nr, struct) \
+	_IOC(_IOC_READ, type, nr, sizeof(struct))
+
+#define HAMMER2_IOW(type, nr, struct) \
+	_IOC(_IOC_WRITE, type, nr, sizeof(struct))
+
+#define HAMMER2_IOWR(type, nr, struct) \
+	_IOC(_IOC_READ|_IOC_WRITE, type, nr, sizeof(struct))
+
+#define HAMMER2IOC_VERSION_GET		HAMMER2_IOWR('h', 64, struct hammer2_ioc_version)
+#define HAMMER2IOC_RECLUSTER		HAMMER2_IOWR('h', 65, struct hammer2_ioc_recluster)
+#define HAMMER2IOC_PFS_GET		HAMMER2_IOWR('h', 80, struct hammer2_ioc_pfs)
+#define HAMMER2IOC_PFS_CREATE		HAMMER2_IOWR('h', 81, struct hammer2_ioc_pfs)
+#define HAMMER2IOC_PFS_DELETE		HAMMER2_IOWR('h', 82, struct hammer2_ioc_pfs)
+#define HAMMER2IOC_PFS_LOOKUP		HAMMER2_IOWR('h', 83, struct hammer2_ioc_pfs)
+#define HAMMER2IOC_PFS_SNAPSHOT		HAMMER2_IOWR('h', 84, struct hammer2_ioc_pfs)
+#define HAMMER2IOC_INODE_GET		HAMMER2_IOWR('h', 86, struct hammer2_ioc_inode)
+#define HAMMER2IOC_INODE_SET		HAMMER2_IOWR('h', 87, struct hammer2_ioc_inode)
+#define HAMMER2IOC_DEBUG_DUMP		HAMMER2_IOWR('h', 91, int)
+#define HAMMER2IOC_BULKFREE_SCAN	HAMMER2_IOWR('h', 92, struct hammer2_ioc_bulkfree)
+#define HAMMER2IOC_DESTROY		HAMMER2_IOWR('h', 94, struct hammer2_ioc_destroy)
+#define HAMMER2IOC_EMERG_MODE		HAMMER2_IOWR('h', 95, int)
+#define HAMMER2IOC_GROWFS		HAMMER2_IOWR('h', 96, struct hammer2_ioc_growfs)
+#define HAMMER2IOC_VOLUME_LIST		HAMMER2_IOWR('h', 97, struct hammer2_ioc_volume_list)
+#define HAMMER2IOC_VOLUME_LIST2		HAMMER2_IOWR('h', 197, struct hammer2_ioc_volume_list2)
+
+#define HAMMER2IOC_PFS_GET_OLD		HAMMER2IOC_PFS_GET
+#define HAMMER2IOC_PFS_CREATE_OLD	HAMMER2IOC_PFS_CREATE
+#define HAMMER2IOC_PFS_DELETE_OLD	HAMMER2IOC_PFS_DELETE
+#define HAMMER2IOC_PFS_LOOKUP_OLD	HAMMER2IOC_PFS_LOOKUP
+#define HAMMER2IOC_PFS_SNAPSHOT_OLD	HAMMER2IOC_PFS_SNAPSHOT
 
 #endif

@@ -112,6 +112,7 @@ LZ4_compress_heap_limitedOutput(
         LZ4_BLINDCOPY(anchor, op, length);
 
 _next_match:
+
         LZ4_WRITE_LITTLEENDIAN_16(op,(U16)(ip-ref));
 
         ip+=MINMATCH; ref+=MINMATCH;
@@ -180,6 +181,7 @@ _endCount:
     }
 
 _last_literals:
+
     {
         int lastRun = (int)(iend - anchor);
 
@@ -280,6 +282,7 @@ LZ4_compress64k_heap_limitedOutput(
         LZ4_BLINDCOPY(anchor, op, length);
 
 _next_match:
+
         LZ4_WRITE_LITTLEENDIAN_16(op,(U16)(ip-ref));
 
         ip+=MINMATCH; ref+=MINMATCH;
@@ -348,6 +351,7 @@ _endCount:
     }
 
 _last_literals:
+
     {
         int lastRun = (int)(iend - anchor);
 

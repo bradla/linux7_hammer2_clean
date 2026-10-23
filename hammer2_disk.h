@@ -1,12 +1,10 @@
-#ifndef _VFS_HAMMER2_DISK_H_
-#define _VFS_HAMMER2_DISK_H_
+#ifndef _HAMMER2_DISK_H_
+#define _HAMMER2_DISK_H_
 
-#ifndef _SYS_UUID_H_
-#include <sys/uuid.h>
-#endif
-#ifndef _SYS_DMSG_H_
-#include <sys/dmsg.h>
-#endif
+#include <linux/types.h>
+#include <linux/uuid.h>
+#include <linux/stddef.h>
+#include <linux/compiler.h>
 
 #define HAMMER2_ALLOC_MIN	1024
 #define HAMMER2_RADIX_MIN	10
@@ -44,28 +42,28 @@
 #define HAMMER2_LBUFMASK	(HAMMER2_LBUFSIZE - 1)
 #define HAMMER2_SEGMASK		(HAMMER2_SEGSIZE - 1)
 
-#define HAMMER2_LBUFMASK64	((hammer2_off_t)HAMMER2_LBUFMASK)
-#define HAMMER2_PBUFSIZE64	((hammer2_off_t)HAMMER2_PBUFSIZE)
-#define HAMMER2_PBUFMASK64	((hammer2_off_t)HAMMER2_PBUFMASK)
-#define HAMMER2_SEGSIZE64	((hammer2_off_t)HAMMER2_SEGSIZE)
-#define HAMMER2_SEGMASK64	((hammer2_off_t)HAMMER2_SEGMASK)
+#define HAMMER2_LBUFMASK64	((u64)HAMMER2_LBUFMASK)
+#define HAMMER2_PBUFSIZE64	((u64)HAMMER2_PBUFSIZE)
+#define HAMMER2_PBUFMASK64	((u64)HAMMER2_PBUFMASK)
+#define HAMMER2_SEGSIZE64	((u64)HAMMER2_SEGSIZE)
+#define HAMMER2_SEGMASK64	((u64)HAMMER2_SEGMASK)
 
 #define HAMMER2_UUID_STRING	"5cbb9ad1-862d-11dc-a94d-01301bb8a9f5"
 
 #define HAMMER2_VOLUME_ALIGN		(8 * 1024 * 1024)
-#define HAMMER2_VOLUME_ALIGN64		((hammer2_off_t)HAMMER2_VOLUME_ALIGN)
+#define HAMMER2_VOLUME_ALIGN64		((u64)HAMMER2_VOLUME_ALIGN)
 #define HAMMER2_VOLUME_ALIGNMASK	(HAMMER2_VOLUME_ALIGN - 1)
-#define HAMMER2_VOLUME_ALIGNMASK64	((hammer2_off_t)HAMMER2_VOLUME_ALIGNMASK)
+#define HAMMER2_VOLUME_ALIGNMASK64	((u64)HAMMER2_VOLUME_ALIGNMASK)
 
 #define HAMMER2_NEWFS_ALIGN		(HAMMER2_VOLUME_ALIGN)
-#define HAMMER2_NEWFS_ALIGN64		((hammer2_off_t)HAMMER2_VOLUME_ALIGN)
+#define HAMMER2_NEWFS_ALIGN64		((u64)HAMMER2_VOLUME_ALIGN)
 #define HAMMER2_NEWFS_ALIGNMASK		(HAMMER2_VOLUME_ALIGN - 1)
-#define HAMMER2_NEWFS_ALIGNMASK64	((hammer2_off_t)HAMMER2_NEWFS_ALIGNMASK)
+#define HAMMER2_NEWFS_ALIGNMASK64	((u64)HAMMER2_NEWFS_ALIGNMASK)
 
 #define HAMMER2_ZONE_BYTES64		(2LLU * 1024 * 1024 * 1024)
 #define HAMMER2_ZONE_MASK64		(HAMMER2_ZONE_BYTES64 - 1)
 #define HAMMER2_ZONE_SEG		(4 * 1024 * 1024)
-#define HAMMER2_ZONE_SEG64		((hammer2_off_t)HAMMER2_ZONE_SEG)
+#define HAMMER2_ZONE_SEG64		((u64)HAMMER2_ZONE_SEG)
 #define HAMMER2_ZONE_BLOCKS_SEG		(HAMMER2_ZONE_SEG / HAMMER2_PBUFSIZE)
 
 #define HAMMER2_ZONE_FREEMAP_INC	5
@@ -81,29 +79,6 @@
 #define HAMMER2_ZONE_FREEMAP_07		36
 #define HAMMER2_ZONE_FREEMAP_END	41
 
-#define HAMMER2_ZONE_UNUSED41		41
-#define HAMMER2_ZONE_UNUSED42		42
-#define HAMMER2_ZONE_UNUSED43		43
-#define HAMMER2_ZONE_UNUSED44		44
-#define HAMMER2_ZONE_UNUSED45		45
-#define HAMMER2_ZONE_UNUSED46		46
-#define HAMMER2_ZONE_UNUSED47		47
-#define HAMMER2_ZONE_UNUSED48		48
-#define HAMMER2_ZONE_UNUSED49		49
-#define HAMMER2_ZONE_UNUSED50		50
-#define HAMMER2_ZONE_UNUSED51		51
-#define HAMMER2_ZONE_UNUSED52		52
-#define HAMMER2_ZONE_UNUSED53		53
-#define HAMMER2_ZONE_UNUSED54		54
-#define HAMMER2_ZONE_UNUSED55		55
-#define HAMMER2_ZONE_UNUSED56		56
-#define HAMMER2_ZONE_UNUSED57		57
-#define HAMMER2_ZONE_UNUSED58		58
-#define HAMMER2_ZONE_UNUSED59		59
-#define HAMMER2_ZONE_UNUSED60		60
-#define HAMMER2_ZONE_UNUSED61		61
-#define HAMMER2_ZONE_UNUSED62		62
-#define HAMMER2_ZONE_UNUSED63		63
 #define HAMMER2_ZONE_END		64
 
 #define HAMMER2_NFREEMAPS		8
@@ -114,9 +89,6 @@
 #define HAMMER2_ZONEFM_LEVEL4		3
 #define HAMMER2_ZONEFM_LEVEL5		4
 
-#if HAMMER2_SET_COUNT != 4
-#error "hammer2_disk.h - freemap assumes SET_COUNT is 4"
-#endif
 #define HAMMER2_FREEMAP_LEVEL6_RADIX	64
 #define HAMMER2_FREEMAP_LEVEL5_RADIX	62
 #define HAMMER2_FREEMAP_LEVEL4_RADIX	54
@@ -127,17 +99,17 @@
 
 #define HAMMER2_FREEMAP_LEVELN_PSIZE	32768
 
-#define HAMMER2_FREEMAP_LEVEL5_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL5_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL5_RADIX)
-#define HAMMER2_FREEMAP_LEVEL4_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL4_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL4_RADIX)
-#define HAMMER2_FREEMAP_LEVEL3_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL3_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL3_RADIX)
-#define HAMMER2_FREEMAP_LEVEL2_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL2_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL2_RADIX)
-#define HAMMER2_FREEMAP_LEVEL1_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL1_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL1_RADIX)
-#define HAMMER2_FREEMAP_LEVEL0_SIZE	((hammer2_off_t)1 <<		\
+#define HAMMER2_FREEMAP_LEVEL0_SIZE	((u64)1 <<					 \
 					 HAMMER2_FREEMAP_LEVEL0_RADIX)
 
 #define HAMMER2_FREEMAP_LEVEL5_MASK	(HAMMER2_FREEMAP_LEVEL5_SIZE - 1)
@@ -151,13 +123,13 @@
 					 sizeof(hammer2_bmap_data_t))
 
 #define H2FMZONEBASE(key)	((key) & ~HAMMER2_FREEMAP_LEVEL1_MASK)
-#define H2FMBASE(key, radix)	rounddown2(key, (hammer2_off_t)1 << (radix))
+#define H2FMBASE(key, radix)	round_down(key, (u64)1 << (radix))
 
 #define HAMMER2_FREEMAP_BLOCK_RADIX	14
 #define HAMMER2_FREEMAP_BLOCK_SIZE	(1 << HAMMER2_FREEMAP_BLOCK_RADIX)
 #define HAMMER2_FREEMAP_BLOCK_MASK	(HAMMER2_FREEMAP_BLOCK_SIZE - 1)
 
-typedef uint64_t hammer2_bitmap_t;
+typedef u64 hammer2_bitmap_t;
 
 #define HAMMER2_BMAP_ALLONES		((hammer2_bitmap_t)-1)
 #define HAMMER2_BMAP_ELEMENTS		8
@@ -181,10 +153,10 @@ typedef uint64_t hammer2_bitmap_t;
 #define HAMMER2_AUX_NOM_BYTES		(256*1024*1024)
 #define HAMMER2_AUX_MAX_BYTES		(1024*1024*1024)
 
-typedef uint64_t hammer2_tid_t;
-typedef uint64_t hammer2_off_t;
-typedef uint64_t hammer2_key_t;
-typedef uint32_t hammer2_crc32_t;
+typedef u64 hammer2_tid_t;
+typedef u64 hammer2_off_t;
+typedef u64 hammer2_key_t;
+typedef u32 hammer2_crc32_t;
 
 #define HAMMER2_TID_MIN		1ULL
 #define HAMMER2_TID_MAX		0xFFFFFFFFFFFFFFFFULL
@@ -199,71 +171,28 @@ typedef uint32_t hammer2_crc32_t;
 #define HAMMER2_DIRHASH_VISIBLE	0x8000000000000000ULL
 #define HAMMER2_DIRHASH_USERMSK	0x7FFFFFFFFFFFFFFFULL
 #define HAMMER2_DIRHASH_LOMASK	0x0000000000007FFFULL
-#if 0
-#define HAMMER2_DIRHASH_HIMASK	0xFFFFFFFFFFFF0000ULL
-#define HAMMER2_DIRHASH_FORCED	0x0000000000008000ULL
-#endif
 
 #define HAMMER2_SROOT_KEY	0x0000000000000000ULL
 #define HAMMER2_BOOT_KEY	0xd9b36ce135528000ULL
 
-struct hammer2_volconf {
-	uint8_t	copyid;
-	uint8_t inprog;
-	uint8_t chain_to;
-	uint8_t chain_from;
-	uint16_t flags;
-	uint8_t error;
-	uint8_t priority;
-	uint8_t remote_pfs_type;
-	uint8_t reserved08[23];
-	uuid_t	pfs_clid;
-	uint8_t label[16];
-	uint8_t path[64];
-} __packed;
-
-typedef struct hammer2_volconf hammer2_volconf_t;
-
-#define DMSG_VOLF_ENABLED	0x0001
-#define DMSG_VOLF_INPROG	0x0002
-#define DMSG_VOLF_CONN_RR	0x80
-#define DMSG_VOLF_CONN_EF	0x40
-#define DMSG_VOLF_CONN_PRI	0x0F
-
-struct dmsg_lnk_hammer2_volconf {
-	dmsg_hdr_t		head;
-	hammer2_volconf_t	copy;
-	int32_t			index;
-	int32_t			unused01;
-	uuid_t			mediaid;
-	int64_t			reserved02[32];
-} __packed;
-
-typedef struct dmsg_lnk_hammer2_volconf dmsg_lnk_hammer2_volconf_t;
-
-#define DMSG_LNK_HAMMER2_VOLCONF DMSG_LNK(DMSG_LNK_CMD_HAMMER2_VOLCONF, \
-					  dmsg_lnk_hammer2_volconf)
-
-#define H2_LNK_VOLCONF(msg)	((dmsg_lnk_hammer2_volconf_t *)(msg)->any.buf)
-
 struct hammer2_dirent_head {
 	hammer2_tid_t		inum;
-	uint16_t		namlen;
-	uint8_t			type;
-	uint8_t			unused0B;
-	uint8_t			unused0C[4];
+	u16			namlen;
+	u8			type;
+	u8			unused0B;
+	u8			unused0C[4];
 } __packed;
 
 typedef struct hammer2_dirent_head hammer2_dirent_head_t;
 
 struct hammer2_blockref {
-	uint8_t		type;
-	uint8_t		methods;
-	uint8_t		copyid;
-	uint8_t		keybits;
-	uint8_t		vradix;
-	uint8_t		flags;
-	uint16_t	leaf_count;
+	u8		type;
+	u8		methods;
+	u8		copyid;
+	u8		keybits;
+	u8		vradix;
+	u8		flags;
+	u16		leaf_count;
 	hammer2_key_t	key;
 	hammer2_tid_t	mirror_tid;
 	hammer2_tid_t	modify_tid;
@@ -282,12 +211,12 @@ struct hammer2_blockref {
 	union {
 		char	buf[64];
 		struct {
-			uint32_t value;
-			uint32_t reserved[15];
+			u32 value;
+			u32 reserved[15];
 		} iscsi32;
 		struct {
-			uint64_t value;
-			uint64_t reserved[7];
+			u64 value;
+			u64 reserved[7];
 		} xxhash64;
 		struct {
 			char data[24];
@@ -302,9 +231,9 @@ struct hammer2_blockref {
 		} sha512;
 
 		struct {
-			uint32_t icrc32;
-			uint32_t bigmask;
-			uint64_t avail;
+			u32 icrc32;
+			u32 bigmask;
+			u64 avail;
 			char reserved[48];
 		} freemap;
 	} check;
@@ -329,7 +258,6 @@ typedef struct hammer2_blockref hammer2_blockref_t;
 #define HAMMER2_BREF_TYPE_VOLUME	255
 
 #define HAMMER2_BREF_FLAG_PFSROOT	0x01
-#define HAMMER2_BREF_FLAG_UNUSED	0x02
 #define HAMMER2_BREF_FLAG_EMERG_MIP	0x04
 
 #define HAMMER2_CHECK_NONE		0
@@ -364,28 +292,19 @@ struct hammer2_blockset {
 
 typedef struct hammer2_blockset hammer2_blockset_t;
 
-#if (1 << HAMMER2_SET_RADIX) != HAMMER2_SET_COUNT
-#error "hammer2 direct radix is incorrect"
-#endif
-#if (1 << HAMMER2_PBUFRADIX) != HAMMER2_PBUFSIZE
-#error "HAMMER2_PBUFRADIX and HAMMER2_PBUFSIZE are inconsistent"
-#endif
-#if (1 << HAMMER2_RADIX_MIN) != HAMMER2_ALLOC_MIN
-#error "HAMMER2_RADIX_MIN and HAMMER2_ALLOC_MIN are inconsistent"
-#endif
-
 struct hammer2_bmap_data {
-	int32_t linear;
-	uint16_t class;
-	uint8_t reserved06;
-	uint8_t reserved07;
-	uint32_t reserved08;
-	uint32_t reserved0C;
-	uint32_t reserved10;
-	uint32_t reserved14;
-	uint32_t reserved18;
-	uint32_t avail;
-	uint32_t reserved20[8];
+	s32 linear;
+	u16 class;
+	u8 reserved06;
+	u8 reserved07;
+	u32 reserved08;
+	u32 reserved0C;
+	u32 reserved10;
+	u32 reserved14;
+	u32 reserved18;
+	u32 avail;
+	u32 reserved20[8];
+
 	hammer2_bitmap_t bitmapq[HAMMER2_BMAP_ELEMENTS];
 } __packed;
 
@@ -397,42 +316,44 @@ typedef struct hammer2_bmap_data hammer2_bmap_data_t;
 
 #define HAMMER2_INODE_START		1024
 
+#define HAMMER2_LINK_MAX		UINT32_MAX
+
 struct hammer2_inode_meta {
-	uint16_t	version;
-	uint8_t		reserved02;
-	uint8_t		pfs_subtype;
+	u16		version;
+	u8		reserved02;
+	u8		pfs_subtype;
 
-	uint32_t	uflags;
-	uint32_t	rmajor;
-	uint32_t	rminor;
-	uint64_t	ctime;
-	uint64_t	mtime;
-	uint64_t	atime;
-	uint64_t	btime;
-	uuid_t		uid;
-	uuid_t		gid;
+	u32		uflags;
+	u32		rmajor;
+	u32		rminor;
+	u64		ctime;
+	u64		mtime;
+	u64		atime;
+	u64		btime;
+	struct uuid	uid;
+	struct uuid	gid;
 
-	uint8_t		type;
-	uint8_t		op_flags;
-	uint16_t	cap_flags;
-	uint32_t	mode;
+	u8		type;
+	u8		op_flags;
+	u16		cap_flags;
+	u32		mode;
 
 	hammer2_tid_t	inum;
 	hammer2_off_t	size;
-	uint64_t	nlinks;
+	u64		nlinks;
 	hammer2_tid_t	iparent;
 	hammer2_key_t	name_key;
-	uint16_t	name_len;
-	uint8_t		ncopies;
-	uint8_t		comp_algo;
-	uint8_t		unused84;
-	uint8_t		check_algo;
+	u16		name_len;
+	u8		ncopies;
+	u8		comp_algo;
+	u8		unused84;
+	u8		check_algo;
 
-	uint8_t		pfs_nmasters;
-	uint8_t		pfs_type;
+	u8		pfs_nmasters;
+	u8		pfs_type;
 	hammer2_tid_t	pfs_inum;
-	uuid_t		pfs_clid;
-	uuid_t		pfs_fsid;
+	struct uuid	pfs_clid;
+	struct uuid	pfs_fsid;
 
 	hammer2_key_t	data_quota;
 	hammer2_key_t	unusedB8;
@@ -442,7 +363,7 @@ struct hammer2_inode_meta {
 	hammer2_tid_t	pfs_lsnap_tid;
 	hammer2_tid_t	reservedD8;
 
-	uint64_t	decrypt_check;
+	u64		decrypt_check;
 	hammer2_off_t	reservedE8[3];
 } __packed;
 
@@ -451,6 +372,7 @@ typedef struct hammer2_inode_meta hammer2_inode_meta_t;
 struct hammer2_inode_data {
 	hammer2_inode_meta_t	meta;
 	unsigned char	filename[HAMMER2_INODE_MAXNAME];
+
 	union {
 		hammer2_blockset_t blockset;
 		char data[HAMMER2_EMBEDDED_BYTES];
@@ -461,7 +383,6 @@ typedef struct hammer2_inode_data hammer2_inode_data_t;
 
 #define HAMMER2_OPFLAG_DIRECTDATA	0x01
 #define HAMMER2_OPFLAG_PFSROOT		0x02
-#define HAMMER2_OPFLAG_COPYIDS		0x04
 
 #define HAMMER2_OBJTYPE_UNKNOWN		0
 #define HAMMER2_OBJTYPE_DIRECTORY	1
@@ -474,44 +395,21 @@ typedef struct hammer2_inode_data hammer2_inode_data_t;
 #define HAMMER2_OBJTYPE_SOCKET		9
 #define HAMMER2_OBJTYPE_WHITEOUT	10
 
-#define HAMMER2_COPYID_NONE		0
-#define HAMMER2_COPYID_LOCAL		((uint8_t)-1)
-
-#define HAMMER2_COPYID_COUNT		256
+#define HAMMER2_COPYID_LOCAL		((u8)-1)
 
 #define HAMMER2_PFSTYPE_NONE		0x00
 #define HAMMER2_PFSTYPE_CACHE		0x01
-#define HAMMER2_PFSTYPE_UNUSED02	0x02
 #define HAMMER2_PFSTYPE_SLAVE		0x03
 #define HAMMER2_PFSTYPE_SOFT_SLAVE	0x04
 #define HAMMER2_PFSTYPE_SOFT_MASTER	0x05
 #define HAMMER2_PFSTYPE_MASTER		0x06
-#define HAMMER2_PFSTYPE_UNUSED07	0x07
 #define HAMMER2_PFSTYPE_SUPROOT		0x08
 #define HAMMER2_PFSTYPE_DUMMY		0x09
 #define HAMMER2_PFSTYPE_MAX		16
 
-#define HAMMER2_PFSTRAN_NONE		0x00
-#define HAMMER2_PFSTRAN_CACHE		0x10
-#define HAMMER2_PFSTRAN_UNUSED20	0x20
-#define HAMMER2_PFSTRAN_SLAVE		0x30
-#define HAMMER2_PFSTRAN_SOFT_SLAVE	0x40
-#define HAMMER2_PFSTRAN_SOFT_MASTER	0x50
-#define HAMMER2_PFSTRAN_MASTER		0x60
-#define HAMMER2_PFSTRAN_UNUSED70	0x70
-#define HAMMER2_PFSTRAN_SUPROOT		0x80
-#define HAMMER2_PFSTRAN_DUMMY		0x90
-
-#define HAMMER2_PFS_DEC(n)		((n) & 0x0F)
-#define HAMMER2_PFS_DEC_TRANSITION(n)	(((n) >> 4) & 0x0F)
-#define HAMMER2_PFS_ENC_TRANSITION(n)	(((n) & 0x0F) << 4)
-
 #define HAMMER2_PFSSUBTYPE_NONE		0
 #define HAMMER2_PFSSUBTYPE_SNAPSHOT	1
 #define HAMMER2_PFSSUBTYPE_AUTOSNAP	2
-
-#define HAMMER2_PFSMODE_QUORUM		0x01
-#define HAMMER2_PFSMODE_RW		0x02
 
 #define HAMMER2_VOLUME_ID_HBO	0x48414d3205172011LLU
 #define HAMMER2_VOLUME_ID_ABO	0x11201705324d4148LLU
@@ -520,25 +418,26 @@ typedef struct hammer2_inode_data hammer2_inode_data_t;
 #define HAMMER2_ROOT_VOLUME	0
 
 struct hammer2_volume_data {
-	uint64_t	magic;
+
+	u64		magic;
 	hammer2_off_t	boot_beg;
 	hammer2_off_t	boot_end;
 	hammer2_off_t	aux_beg;
 	hammer2_off_t	aux_end;
 	hammer2_off_t	volu_size;
 
-	uint32_t	version;
-	uint32_t	flags;
-	uint8_t		copyid;
-	uint8_t		freemap_version;
-	uint8_t		peer_type;
-	uint8_t		volu_id;
-	uint8_t		nvolumes;
-	uint8_t		reserved003D;
-	uint16_t	reserved003E;
+	u32		version;
+	u32		flags;
+	u8		copyid;
+	u8		freemap_version;
+	u8		peer_type;
+	u8		volu_id;
+	u8		nvolumes;
+	u8		reserved003D;
+	u16		reserved003E;
 
-	uuid_t		fsid;
-	uuid_t		fstype;
+	struct uuid	fsid;
+	struct uuid	fstype;
 
 	hammer2_off_t	allocator_size;
 	hammer2_off_t   allocator_free;
@@ -553,7 +452,7 @@ struct hammer2_volume_data {
 
 	hammer2_off_t	total_size;
 
-	uint32_t	copyexists[8];
+	u32		copyexists[8];
 	char		reserved00E8[248];
 
 	hammer2_crc32_t	icrc_sects[8];
@@ -568,7 +467,7 @@ struct hammer2_volume_data {
 
 	hammer2_off_t volu_loff[HAMMER2_MAX_VOLUMES];
 
-	hammer2_volconf_t copyinfo[HAMMER2_COPYID_COUNT];
+	char		reserved_volconf[0x8000];
 
 	char		reserved9000[0x6FFC];
 
@@ -608,5 +507,16 @@ union hammer2_media_data {
 } __packed;
 
 typedef union hammer2_media_data hammer2_media_data_t;
+
+#define HAMMER2_BUILD_BUG_ON(cond) BUILD_BUG_ON(cond)
+
+#if 0
+HAMMER2_BUILD_BUG_ON((1 << HAMMER2_SET_RADIX) != HAMMER2_SET_COUNT);
+HAMMER2_BUILD_BUG_ON((1 << HAMMER2_PBUFRADIX) != HAMMER2_PBUFSIZE);
+HAMMER2_BUILD_BUG_ON((1 << HAMMER2_RADIX_MIN) != HAMMER2_ALLOC_MIN);
+HAMMER2_BUILD_BUG_ON(sizeof(struct hammer2_blockref) != HAMMER2_BLOCKREF_BYTES);
+HAMMER2_BUILD_BUG_ON(sizeof(struct hammer2_inode_data) != HAMMER2_INODE_BYTES);
+HAMMER2_BUILD_BUG_ON(sizeof(struct hammer2_volume_data) != HAMMER2_VOLUME_BYTES);
+#endif
 
 #endif

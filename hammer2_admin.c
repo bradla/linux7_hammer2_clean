@@ -28,203 +28,52 @@ H2XOPDESCRIPTOR(strategy_read);
 H2XOPDESCRIPTOR(strategy_write);
 H2XOPDESCRIPTOR(bmap);
 
-struct objcache *cache_xops;
-
-void
-hammer2_thr_signal(hammer2_thread_t *thr, uint32_t flags)
+static void
+hammer2_xop_fifo_alloc(hammer2_xop_fifo_t *fifo, size_t new_nmemb,
+    size_t old_nmemb, int want_brefs)
 {
-	uint32_t oflags;
-	uint32_t nflags;
+	int flags = M_WAITOK | M_ZERO;
+	size_t new_size, old_size;
 
-	for (;;) {
-		oflags = thr->flags;
-		cpu_ccfence();
-		nflags = (oflags | flags) & ~HAMMER2_THREAD_WAITING;
+	KKASSERT(new_nmemb > old_nmemb);
+	if (old_nmemb == 0)
+		KKASSERT(!fifo->array && !fifo->errors);
+	else
+		KKASSERT(fifo->array && fifo->errors);
 
-		if (oflags & HAMMER2_THREAD_WAITING) {
-			if (atomic_cmpset_int(&thr->flags, oflags, nflags)) {
-				wakeup(&thr->flags);
-				break;
-			}
-		} else {
-			if (atomic_cmpset_int(&thr->flags, oflags, nflags))
-				break;
-		}
+	KKASSERT((new_nmemb & (new_nmemb - 1)) == 0);
+	KKASSERT(new_nmemb >= HAMMER2_XOPFIFO);
+
+	new_size = new_nmemb * sizeof(hammer2_chain_t *);
+	old_size = old_nmemb * sizeof(hammer2_chain_t *);
+	if (!fifo->array)
+		fifo->array = hmalloc(new_size, M_HAMMER2, flags);
+	else
+		fifo->array = hrealloc(fifo->array, new_size, M_HAMMER2, flags);
+	KKASSERT(fifo->array);
+	adjust_malloc_leak(-old_size, M_HAMMER2);
+
+	new_size = new_nmemb * sizeof(int);
+	old_size = old_nmemb * sizeof(int);
+	if (!fifo->errors)
+		fifo->errors = hmalloc(new_size, M_HAMMER2, flags);
+	else
+		fifo->errors = hrealloc(fifo->errors, new_size, M_HAMMER2,
+		    flags);
+	KKASSERT(fifo->errors);
+	adjust_malloc_leak(-old_size, M_HAMMER2);
+
+	if (want_brefs) {
+		new_size = new_nmemb * sizeof(hammer2_blockref_t);
+		old_size = old_nmemb * sizeof(hammer2_blockref_t);
+		if (!fifo->brefs)
+			fifo->brefs = hmalloc(new_size, M_HAMMER2, flags);
+		else
+			fifo->brefs = hrealloc(fifo->brefs, new_size, M_HAMMER2,
+			    flags);
+		KKASSERT(fifo->brefs);
+		adjust_malloc_leak(-old_size, M_HAMMER2);
 	}
-}
-
-void
-hammer2_thr_signal2(hammer2_thread_t *thr, uint32_t posflags, uint32_t negflags)
-{
-	uint32_t oflags;
-	uint32_t nflags;
-
-	for (;;) {
-		oflags = thr->flags;
-		cpu_ccfence();
-		nflags = (oflags | posflags) &
-			~(negflags | HAMMER2_THREAD_WAITING);
-		if (oflags & HAMMER2_THREAD_WAITING) {
-			if (atomic_cmpset_int(&thr->flags, oflags, nflags)) {
-				wakeup(&thr->flags);
-				break;
-			}
-		} else {
-			if (atomic_cmpset_int(&thr->flags, oflags, nflags))
-				break;
-		}
-	}
-}
-
-void
-hammer2_thr_wait(hammer2_thread_t *thr, uint32_t flags)
-{
-	uint32_t oflags;
-	uint32_t nflags;
-
-	for (;;) {
-		oflags = thr->flags;
-		cpu_ccfence();
-		if ((oflags & flags) == flags)
-			break;
-		nflags = oflags | HAMMER2_THREAD_WAITING;
-		tsleep_interlock(&thr->flags, 0);
-		if (atomic_cmpset_int(&thr->flags, oflags, nflags)) {
-			tsleep(&thr->flags, PINTERLOCKED, "h2twait", hz*60);
-		}
-	}
-}
-
-int
-hammer2_thr_wait_any(hammer2_thread_t *thr, uint32_t flags, int timo)
-{
-	uint32_t oflags;
-	uint32_t nflags;
-	int error;
-
-	error = 0;
-	for (;;) {
-		oflags = thr->flags;
-		cpu_ccfence();
-		if (oflags & flags)
-			break;
-		nflags = oflags | HAMMER2_THREAD_WAITING;
-		tsleep_interlock(&thr->flags, 0);
-		if (atomic_cmpset_int(&thr->flags, oflags, nflags)) {
-			error = tsleep(&thr->flags, PINTERLOCKED,
-				       "h2twait", timo);
-		}
-		if (error == ETIMEDOUT) {
-			error = HAMMER2_ERROR_ETIMEDOUT;
-			break;
-		}
-	}
-	return error;
-}
-
-void
-hammer2_thr_wait_neg(hammer2_thread_t *thr, uint32_t flags)
-{
-	uint32_t oflags;
-	uint32_t nflags;
-
-	for (;;) {
-		oflags = thr->flags;
-		cpu_ccfence();
-		if ((oflags & flags) == 0)
-			break;
-		nflags = oflags | HAMMER2_THREAD_WAITING;
-		tsleep_interlock(&thr->flags, 0);
-		if (atomic_cmpset_int(&thr->flags, oflags, nflags)) {
-			tsleep(&thr->flags, PINTERLOCKED, "h2twait", hz*60);
-		}
-	}
-}
-
-void
-hammer2_thr_create(hammer2_thread_t *thr, hammer2_pfs_t *pmp,
-		   hammer2_dev_t *hmp,
-		   const char *id, int clindex, int repidx,
-		   void (*func)(void *arg))
-{
-	thr->pmp = pmp;
-	thr->hmp = hmp;
-	thr->clindex = clindex;
-	thr->repidx = repidx;
-	TAILQ_INIT(&thr->xopq);
-	atomic_clear_int(&thr->flags, HAMMER2_THREAD_STOP |
-				      HAMMER2_THREAD_STOPPED |
-				      HAMMER2_THREAD_FREEZE |
-				      HAMMER2_THREAD_FROZEN);
-	if (thr->scratch == NULL)
-		thr->scratch = kmalloc(MAXPHYS, M_HAMMER2, M_WAITOK | M_ZERO);
-	if (repidx >= 0) {
-		lwkt_create(func, thr, &thr->td, NULL, 0, repidx % ncpus,
-			    "%s-%s.%02d", id, pmp->pfs_names[clindex], repidx);
-	} else if (pmp) {
-		lwkt_create(func, thr, &thr->td, NULL, 0, -1,
-			    "%s-%s", id, pmp->pfs_names[clindex]);
-	} else {
-		lwkt_create(func, thr, &thr->td, NULL, 0, -1, "%s", id);
-	}
-}
-
-void
-hammer2_thr_delete(hammer2_thread_t *thr)
-{
-	if (thr->td == NULL)
-		return;
-	hammer2_thr_signal(thr, HAMMER2_THREAD_STOP);
-	hammer2_thr_wait(thr, HAMMER2_THREAD_STOPPED);
-	thr->pmp = NULL;
-	if (thr->scratch) {
-		kfree(thr->scratch, M_HAMMER2);
-		thr->scratch = NULL;
-	}
-	KKASSERT(TAILQ_EMPTY(&thr->xopq));
-}
-
-void
-hammer2_thr_remaster(hammer2_thread_t *thr)
-{
-	if (thr->td == NULL)
-		return;
-	hammer2_thr_signal(thr, HAMMER2_THREAD_REMASTER);
-}
-
-void
-hammer2_thr_freeze_async(hammer2_thread_t *thr)
-{
-	hammer2_thr_signal(thr, HAMMER2_THREAD_FREEZE);
-}
-
-void
-hammer2_thr_freeze(hammer2_thread_t *thr)
-{
-	if (thr->td == NULL)
-		return;
-	hammer2_thr_signal(thr, HAMMER2_THREAD_FREEZE);
-	hammer2_thr_wait(thr, HAMMER2_THREAD_FROZEN);
-}
-
-void
-hammer2_thr_unfreeze(hammer2_thread_t *thr)
-{
-	if (thr->td == NULL)
-		return;
-	hammer2_thr_signal(thr, HAMMER2_THREAD_UNFREEZE);
-	hammer2_thr_wait_neg(thr, HAMMER2_THREAD_FROZEN);
-}
-
-int
-hammer2_thr_break(hammer2_thread_t *thr)
-{
-	if (thr->flags & (HAMMER2_THREAD_STOP |
-			  HAMMER2_THREAD_REMASTER |
-			  HAMMER2_THREAD_FREEZE)) {
-		return 1;
-	}
-	return 0;
 }
 
 void *
@@ -232,16 +81,11 @@ hammer2_xop_alloc(hammer2_inode_t *ip, int flags)
 {
 	hammer2_xop_t *xop;
 
-	xop = objcache_get(cache_xops, M_WAITOK);
+	xop = uma_zalloc(hammer2_zone_xops, M_WAITOK | M_ZERO);
 	KKASSERT(xop->head.cluster.array[0].chain == NULL);
 
 	xop->head.ip1 = ip;
-	xop->head.desc = NULL;
 	xop->head.flags = flags;
-	xop->head.state = 0;
-	xop->head.error = 0;
-	xop->head.collect_key = 0;
-	xop->head.focus_dio = NULL;
 
 	if (flags & HAMMER2_XOP_MODIFYING)
 		xop->head.mtid = hammer2_trans_sub(ip->pmp);
@@ -250,19 +94,70 @@ hammer2_xop_alloc(hammer2_inode_t *ip, int flags)
 
 	xop->head.cluster.nchains = ip->cluster.nchains;
 	xop->head.cluster.pmp = ip->pmp;
-	xop->head.cluster.flags = HAMMER2_CLUSTER_LOCKED;
+	hammer2_assert_cluster(&ip->cluster);
 
 	xop->head.run_mask = HAMMER2_XOPMASK_VOP;
 
+	hammer2_xop_fifo_t *fifo = &xop->head.collect[0];
+	xop->head.fifo_size = HAMMER2_XOPFIFO;
+	hammer2_xop_fifo_alloc(fifo, xop->head.fifo_size, 0,
+	    flags & HAMMER2_XOP_FIFO_BREF);
+
 	hammer2_inode_ref(ip);
 
-	return xop;
+	return (xop);
+}
+
+void
+hammer2_xop_setbound(hammer2_xop_head_t *xop, int bound)
+{
+	hammer2_xop_fifo_t *fifo = &xop->collect[0];
+	hammer2_chain_t **narray;
+	hammer2_blockref_t *nbrefs;
+	int *nerrors;
+	int want;
+
+	KKASSERT(xop->flags & HAMMER2_XOP_FIFO_BOUND);
+	KKASSERT(bound > 0);
+
+	want = HAMMER2_XOPFIFO;
+	while (want < bound)
+		want <<= 1;
+
+	if (want > xop->fifo_size) {
+		narray = hrealloc(fifo->array,
+		    want * sizeof(hammer2_chain_t *), M_HAMMER2, M_WAITOK);
+		if (narray) {
+			fifo->array = narray;
+			nerrors = hrealloc(fifo->errors, want * sizeof(int),
+			    M_HAMMER2, M_WAITOK);
+			if (nerrors) {
+				fifo->errors = nerrors;
+
+				if (xop->flags & HAMMER2_XOP_FIFO_BREF) {
+					nbrefs = hrealloc(fifo->brefs,
+					    want * sizeof(hammer2_blockref_t),
+					    M_HAMMER2, M_WAITOK);
+					if (nbrefs) {
+						fifo->brefs = nbrefs;
+						xop->fifo_size = want;
+					}
+				} else {
+					xop->fifo_size = want;
+				}
+			}
+		}
+	}
+
+	if (bound > xop->fifo_size)
+		bound = xop->fifo_size;
+	xop->fifo_bound = bound;
 }
 
 void
 hammer2_xop_setname(hammer2_xop_head_t *xop, const char *name, size_t name_len)
 {
-	xop->name1 = kmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
+	xop->name1 = hmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
 	xop->name1_len = name_len;
 	bcopy(name, xop->name1, name_len);
 }
@@ -270,7 +165,7 @@ hammer2_xop_setname(hammer2_xop_head_t *xop, const char *name, size_t name_len)
 void
 hammer2_xop_setname2(hammer2_xop_head_t *xop, const char *name, size_t name_len)
 {
-	xop->name2 = kmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
+	xop->name2 = hmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
 	xop->name2_len = name_len;
 	bcopy(name, xop->name2, name_len);
 }
@@ -280,11 +175,11 @@ hammer2_xop_setname_inum(hammer2_xop_head_t *xop, hammer2_key_t inum)
 {
 	const size_t name_len = 18;
 
-	xop->name1 = kmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
+	xop->name1 = hmalloc(name_len + 1, M_HAMMER2, M_WAITOK | M_ZERO);
 	xop->name1_len = name_len;
-	ksnprintf(xop->name1, name_len + 1, "0x%016jx", (intmax_t)inum);
+	snprintf(xop->name1, name_len + 1, "0x%016llx", (long long)inum);
 
-	return name_len;
+	return (name_len);
 }
 
 void
@@ -308,159 +203,292 @@ hammer2_xop_setip4(hammer2_xop_head_t *xop, hammer2_inode_t *ip4)
 	hammer2_inode_ref(ip4);
 }
 
-void
-hammer2_xop_reinit(hammer2_xop_head_t *xop)
+static __inline int
+hammer2_xop_active(const hammer2_xop_head_t *xop)
 {
-	xop->state = 0;
-	xop->error = 0;
-	xop->collect_key = 0;
-	xop->run_mask = HAMMER2_XOPMASK_VOP;
+	if (xop->run_mask & HAMMER2_XOPMASK_VOP)
+		return (1);
+	else
+		return (0);
 }
 
-void
-hammer2_xop_helper_create(hammer2_pfs_t *pmp)
+static int
+xop_testset_ipdep(hammer2_inode_t *ip, int idx)
 {
-	int i;
-	int j;
+	hammer2_ipdep_list_t *ipdep;
+	hammer2_inode_t *iptmp;
 
-	lockmgr(&pmp->lock, LK_EXCLUSIVE);
-	pmp->has_xop_threads = 1;
+	hammer2_lk_assert_ex(&ip->pmp->xop_lock[idx]);
 
-	pmp->xop_groups = kmalloc(hammer2_xop_nthreads *
-				  sizeof(hammer2_xop_group_t),
-				  M_HAMMER2, M_WAITOK | M_ZERO);
-	for (i = 0; i < pmp->iroot->cluster.nchains; ++i) {
-		for (j = 0; j < hammer2_xop_nthreads; ++j) {
-			if (pmp->xop_groups[j].thrs[i].td)
-				continue;
-			hammer2_thr_create(&pmp->xop_groups[j].thrs[i],
-					   pmp, NULL,
-					   "h2xop", i, j,
-					   hammer2_primary_xops_thread);
-		}
-	}
-	lockmgr(&pmp->lock, LK_RELEASE);
+	ipdep = &ip->pmp->ipdep_lists[idx];
+	LIST_FOREACH(iptmp, ipdep, ientry)
+		if (iptmp == ip)
+			return (1);
+
+	LIST_INSERT_HEAD(ipdep, ip, ientry);
+	return (0);
 }
 
-void
-hammer2_xop_helper_cleanup(hammer2_pfs_t *pmp)
+static void
+xop_unset_ipdep(hammer2_inode_t *ip, int idx)
 {
-	int i;
-	int j;
+	hammer2_ipdep_list_t *ipdep;
+	hammer2_inode_t *iptmp;
 
-	if (pmp->xop_groups == NULL) {
-		KKASSERT(pmp->has_xop_threads == 0);
-		return;
+	hammer2_lk_assert_ex(&ip->pmp->xop_lock[idx]);
+
+	ipdep = &ip->pmp->ipdep_lists[idx];
+	LIST_FOREACH(iptmp, ipdep, ientry)
+		if (iptmp == ip) {
+			LIST_REMOVE(ip, ientry);
+			return;
+		}
+}
+
+static void
+hammer2_xop_testset_ipdep(hammer2_inode_t *ip)
+{
+	hammer2_pfs_t *pmp = ip->pmp;
+	hammer2_lk_t *mtx;
+	hammer2_lkc_t *cv;
+
+	mtx = &pmp->xop_lock[ip->ipdep_idx];
+	cv = &pmp->xop_cv[ip->ipdep_idx];
+
+	hammer2_lk_ex(mtx);
+again:
+	if (xop_testset_ipdep(ip, ip->ipdep_idx)) {
+		pmp->flags |= HAMMER2_PMPF_WAITING;
+		hammer2_lkc_sleep(cv, mtx, "h2pmp_xop", 0);
+		goto again;
 	}
+	hammer2_lk_unlock(mtx);
+}
 
-	for (i = 0; i < pmp->pfs_nmasters; ++i) {
-		for (j = 0; j < hammer2_xop_nthreads; ++j) {
-			if (pmp->xop_groups[j].thrs[i].td)
-				hammer2_thr_delete(&pmp->xop_groups[j].thrs[i]);
+static int
+hammer2_xop_testset_ipdep_try(hammer2_inode_t *ip)
+{
+	hammer2_pfs_t *pmp = ip->pmp;
+	hammer2_lk_t *mtx = &pmp->xop_lock[ip->ipdep_idx];
+	int collision;
+
+	hammer2_lk_ex(mtx);
+	collision = xop_testset_ipdep(ip, ip->ipdep_idx);
+	hammer2_lk_unlock(mtx);
+
+	return (collision);
+}
+
+static void
+hammer2_xop_unset_ipdep(hammer2_inode_t *ip)
+{
+	hammer2_pfs_t *pmp = ip->pmp;
+	hammer2_lk_t *mtx;
+	hammer2_lkc_t *cv;
+
+	mtx = &pmp->xop_lock[ip->ipdep_idx];
+	cv = &pmp->xop_cv[ip->ipdep_idx];
+
+	hammer2_lk_ex(mtx);
+	xop_unset_ipdep(ip, ip->ipdep_idx);
+
+	pmp->flags &= ~HAMMER2_PMPF_WAITING;
+	hammer2_lkc_wakeup(cv);
+
+	hammer2_lk_unlock(mtx);
+}
+
+#ifdef HAMMER2_INVARIANTS
+
+static __inline void
+xop_storage_func(hammer2_xop_head_t *xop, hammer2_inode_t *ip, void *scratch,
+    int i)
+{
+#ifdef XOP_ADMIN_DEBUG
+	hprintf("xop_%s inum %016llx index %d\n",
+	    xop->desc->id, (long long)ip->meta.inum, i);
+#endif
+	xop->desc->storage_func((hammer2_xop_t *)xop, scratch, i);
+#ifdef XOP_ADMIN_DEBUG
+	hprintf("xop_%s inum %016llx index %d done\n",
+	    xop->desc->id, (long long)ip->meta.inum, i);
+#endif
+}
+#else
+#define xop_storage_func(xop, ip, scratch, i)	\
+	xop->desc->storage_func((hammer2_xop_t *)xop, scratch, i)
+#endif
+
+void
+hammer2_xop_start(hammer2_xop_head_t *xop, hammer2_xop_desc_t *desc)
+{
+	hammer2_inode_t *ip = xop->ip1;
+	uint32_t mask;
+	int i;
+
+	KKASSERT(ip);
+	hammer2_assert_cluster(&ip->cluster);
+	xop->desc = desc;
+
+	if (desc == &hammer2_strategy_write_desc)
+		xop->scratch = hmalloc(hammer2_get_logical(), M_HAMMER2,
+		    M_WAITOK | M_ZERO);
+
+	for (i = 0; i < ip->cluster.nchains; ++i) {
+		mask = 1LLU << i;
+		if (ip->cluster.array[i].chain) {
+			atomic_set_32(&xop->run_mask, mask);
+			atomic_set_32(&xop->chk_mask, mask);
+		} else {
+			continue;
+		}
+
+		if (hammer2_xop_active(xop)) {
+
+			if (xop->flags & HAMMER2_XOP_NONBLOCK) {
+				hammer2_inode_t *got2 = NULL, *got3 = NULL;
+				int collision, got1;
+
+				collision = hammer2_xop_testset_ipdep_try(ip);
+				got1 = !collision;
+				if (!collision && xop->ip2) {
+					collision = hammer2_xop_testset_ipdep_try(xop->ip2);
+					if (!collision)
+						got2 = xop->ip2;
+				}
+				if (!collision && xop->ip3 && xop->ip3 != xop->ip1) {
+					collision = hammer2_xop_testset_ipdep_try(xop->ip3);
+					if (!collision)
+						got3 = xop->ip3;
+				}
+				if (!collision && xop->ip4 && xop->ip4 != xop->ip2)
+					collision = hammer2_xop_testset_ipdep_try(xop->ip4);
+				if (collision) {
+					if (got3)
+						hammer2_xop_unset_ipdep(got3);
+					if (got2)
+						hammer2_xop_unset_ipdep(got2);
+
+					if (got1)
+						hammer2_xop_unset_ipdep(ip);
+					xop->flags |= HAMMER2_XOP_ABORTED;
+					hammer2_xop_feed(xop, NULL, i, EAGAIN);
+					hammer2_xop_retire(xop, mask);
+					continue;
+				}
+			} else {
+				hammer2_xop_testset_ipdep(ip);
+				if (xop->ip2)
+					hammer2_xop_testset_ipdep(xop->ip2);
+				if (xop->ip3 && xop->ip3 != xop->ip1)
+					hammer2_xop_testset_ipdep(xop->ip3);
+				if (xop->ip4 && xop->ip4 != xop->ip2)
+					hammer2_xop_testset_ipdep(xop->ip4);
+			}
+			xop_storage_func(xop, ip, xop->scratch, i);
+			hammer2_xop_retire(xop, mask);
+		} else {
+			hammer2_xop_feed(xop, NULL, i, ECONNABORTED);
+			hammer2_xop_retire(xop, mask);
 		}
 	}
-	pmp->has_xop_threads = 0;
-	kfree(pmp->xop_groups, M_HAMMER2);
-	pmp->xop_groups = NULL;
 }
 
 void
 hammer2_xop_start_except(hammer2_xop_head_t *xop, hammer2_xop_desc_t *desc,
 			 int notidx)
 {
-	hammer2_inode_t *ip1;
-	hammer2_pfs_t *pmp;
-	hammer2_thread_t *thr;
+	hammer2_inode_t *ip = xop->ip1;
+	uint32_t mask;
 	int i;
-	int ng;
-	int nchains;
 
-	ip1 = xop->ip1;
-	pmp = ip1->pmp;
-	if (pmp->has_xop_threads == 0)
-		hammer2_xop_helper_create(pmp);
-
-	if (xop->flags & HAMMER2_XOP_STRATEGY) {
-		hammer2_xop_strategy_t *xopst;
-		u_int which;
-
-		xopst = &((hammer2_xop_t *)xop)->xop_strategy;
-		which = ((unsigned int)ip1->ihash +
-			 ((unsigned int)xopst->lbase >> HAMMER2_PBUFRADIX)) %
-			hammer2_xop_sgroups;
-		ng = mycpu->gd_cpuid % hammer2_xop_mod +
-		     hammer2_xop_mod * which;
-	} else if (hammer2_spread_workers == 0 && ip1->cluster.nchains == 1) {
-		u_int which;
-
-		which = (unsigned int)ip1->ihash % hammer2_xop_xgroups;
-		ng = mycpu->gd_cpuid % hammer2_xop_mod +
-		     (which * hammer2_xop_mod) +
-		     hammer2_xop_xbase;
-	} else {
-		ng = (unsigned int)ip1->ihash %
-		     (hammer2_xop_mod * hammer2_xop_xgroups) +
-		     hammer2_xop_xbase;
-	}
+	KKASSERT(ip);
+	hammer2_assert_cluster(&ip->cluster);
 	xop->desc = desc;
 
-	hammer2_spin_ex(&pmp->xop_spin);
-	nchains = ip1->cluster.nchains;
-	for (i = 0; i < nchains; ++i) {
-		if (i != notidx && ip1->cluster.array[i].chain) {
-			thr = &pmp->xop_groups[ng].thrs[i];
-			atomic_set_64(&xop->run_mask, 1LLU << i);
-			atomic_set_64(&xop->chk_mask, 1LLU << i);
-			xop->collect[i].thr = thr;
-			TAILQ_INSERT_TAIL(&thr->xopq, xop, collect[i].entry);
-		}
-	}
-	hammer2_spin_unex(&pmp->xop_spin);
+	if (desc == &hammer2_strategy_write_desc)
+		xop->scratch = hmalloc(hammer2_get_logical(), M_HAMMER2,
+		    M_WAITOK | M_ZERO);
 
-	for (i = 0; i < nchains; ++i) {
-		if (i != notidx) {
-			thr = &pmp->xop_groups[ng].thrs[i];
-			hammer2_thr_signal(thr, HAMMER2_THREAD_XOPQ);
+	for (i = 0; i < ip->cluster.nchains; ++i) {
+		if (i == notidx)
+			continue;
+		mask = 1LLU << i;
+		if (ip->cluster.array[i].chain) {
+			atomic_set_32(&xop->run_mask, mask);
+			atomic_set_32(&xop->chk_mask, mask);
+		} else {
+			continue;
+		}
+
+		if (hammer2_xop_active(xop)) {
+
+			if (xop->flags & HAMMER2_XOP_NONBLOCK) {
+				hammer2_inode_t *got2 = NULL, *got3 = NULL;
+				int collision, got1;
+
+				collision = hammer2_xop_testset_ipdep_try(ip);
+				got1 = !collision;
+				if (!collision && xop->ip2) {
+					collision = hammer2_xop_testset_ipdep_try(xop->ip2);
+					if (!collision)
+						got2 = xop->ip2;
+				}
+				if (!collision && xop->ip3 && xop->ip3 != xop->ip1) {
+					collision = hammer2_xop_testset_ipdep_try(xop->ip3);
+					if (!collision)
+						got3 = xop->ip3;
+				}
+				if (!collision && xop->ip4 && xop->ip4 != xop->ip2)
+					collision = hammer2_xop_testset_ipdep_try(xop->ip4);
+				if (collision) {
+					if (got3)
+						hammer2_xop_unset_ipdep(got3);
+					if (got2)
+						hammer2_xop_unset_ipdep(got2);
+
+					if (got1)
+						hammer2_xop_unset_ipdep(ip);
+					xop->flags |= HAMMER2_XOP_ABORTED;
+					hammer2_xop_feed(xop, NULL, i, EAGAIN);
+					hammer2_xop_retire(xop, mask);
+					continue;
+				}
+			} else {
+				hammer2_xop_testset_ipdep(ip);
+				if (xop->ip2)
+					hammer2_xop_testset_ipdep(xop->ip2);
+				if (xop->ip3 && xop->ip3 != xop->ip1)
+					hammer2_xop_testset_ipdep(xop->ip3);
+				if (xop->ip4 && xop->ip4 != xop->ip2)
+					hammer2_xop_testset_ipdep(xop->ip4);
+			}
+			xop_storage_func(xop, ip, xop->scratch, i);
+			hammer2_xop_retire(xop, mask);
+		} else {
+			hammer2_xop_feed(xop, NULL, i, ECONNABORTED);
+			hammer2_xop_retire(xop, mask);
 		}
 	}
 }
 
 void
-hammer2_xop_start(hammer2_xop_head_t *xop, hammer2_xop_desc_t *desc)
+hammer2_xop_retire(hammer2_xop_head_t *xop, uint32_t mask)
 {
-	hammer2_xop_start_except(xop, desc, -1);
-}
+	hammer2_chain_t *chain, *dropch[HAMMER2_MAXCLUSTER];
+	hammer2_inode_t *ip;
+	hammer2_xop_fifo_t *fifo;
+	uint32_t omask;
+	int prior_nchains, i;
 
-void
-hammer2_xop_retire(hammer2_xop_head_t *xop, uint64_t mask)
-{
-	hammer2_chain_t *chain;
-	uint64_t nmask;
-	int i;
+	KASSERTMSG(xop->run_mask & mask,
+	    "run_mask %x vs mask %x", xop->run_mask, mask);
+	omask = atomic_fetchadd_32(&xop->run_mask, -mask);
 
-	KKASSERT(xop->run_mask & mask);
-	nmask = atomic_fetchadd_64(&xop->run_mask,
-				   -mask + HAMMER2_XOPMASK_FEED);
-
-	if ((nmask & HAMMER2_XOPMASK_ALLDONE) != mask) {
-		if (mask == HAMMER2_XOPMASK_VOP) {
-			if (nmask & HAMMER2_XOPMASK_FIFOW)
-				wakeup(xop);
-		}
-
-		nmask -= mask;
-		if ((nmask & HAMMER2_XOPMASK_ALLDONE) == HAMMER2_XOPMASK_VOP) {
-			if (nmask & HAMMER2_XOPMASK_WAIT)
-				wakeup(xop);
-		}
-
+	if ((omask & HAMMER2_XOPMASK_ALLDONE) != mask)
 		return;
-	}
 
 	if (xop->ip1) {
-		hammer2_chain_t *dropch[HAMMER2_MAXCLUSTER];
-		hammer2_inode_t *ip;
-		int prior_nchains;
 
 		ip = xop->ip1;
 		hammer2_spin_ex(&ip->cluster_spin);
@@ -493,12 +521,11 @@ hammer2_xop_retire(hammer2_xop_head_t *xop, uint64_t mask)
 		}
 	}
 
-	cpu_lfence();
 	mask = xop->chk_mask;
 	for (i = 0; mask && i < HAMMER2_MAXCLUSTER; ++i) {
-		hammer2_xop_fifo_t *fifo = &xop->collect[i];
+		fifo = &xop->collect[i];
 		while (fifo->ri != fifo->wi) {
-			chain = fifo->array[fifo->ri & HAMMER2_XOPFIFO_MASK];
+			chain = fifo->array[fifo->ri & fifo_mask(xop)];
 			if (chain)
 				hammer2_chain_drop_unhold(chain);
 			++fifo->ri;
@@ -506,51 +533,72 @@ hammer2_xop_retire(hammer2_xop_head_t *xop, uint64_t mask)
 		mask &= ~(1U << i);
 	}
 
+	if (xop->flags & HAMMER2_XOP_ABORTED) {
+		if (xop->ip1) { hammer2_inode_drop(xop->ip1); xop->ip1 = NULL; }
+		if (xop->ip2) { hammer2_inode_drop(xop->ip2); xop->ip2 = NULL; }
+		if (xop->ip3) { hammer2_inode_drop(xop->ip3); xop->ip3 = NULL; }
+		if (xop->ip4) { hammer2_inode_drop(xop->ip4); xop->ip4 = NULL; }
+	}
 	if (xop->ip1) {
+		hammer2_xop_unset_ipdep(xop->ip1);
 		hammer2_inode_drop(xop->ip1);
 		xop->ip1 = NULL;
 	}
 	if (xop->ip2) {
+		hammer2_xop_unset_ipdep(xop->ip2);
 		hammer2_inode_drop(xop->ip2);
 		xop->ip2 = NULL;
 	}
 	if (xop->ip3) {
+		if (xop->ip3 && xop->ip3 != xop->ip1)
+			hammer2_xop_unset_ipdep(xop->ip3);
 		hammer2_inode_drop(xop->ip3);
 		xop->ip3 = NULL;
 	}
 	if (xop->ip4) {
+		if (xop->ip4 && xop->ip4 != xop->ip2)
+			hammer2_xop_unset_ipdep(xop->ip4);
 		hammer2_inode_drop(xop->ip4);
 		xop->ip4 = NULL;
 	}
+
 	if (xop->name1) {
-		kfree(xop->name1, M_HAMMER2);
+		hfree(xop->name1, M_HAMMER2, strlen(xop->name1) + 1);
 		xop->name1 = NULL;
 		xop->name1_len = 0;
 	}
 	if (xop->name2) {
-		kfree(xop->name2, M_HAMMER2);
+		hfree(xop->name2, M_HAMMER2, strlen(xop->name2) + 1);
 		xop->name2 = NULL;
 		xop->name2_len = 0;
 	}
 
-	objcache_put(cache_xops, xop);
+	for (i = 0; i < xop->cluster.nchains; ++i) {
+		fifo = &xop->collect[i];
+		KKASSERT(fifo->array == NULL || xop->fifo_size > 0);
+		KKASSERT(fifo->errors == NULL || xop->fifo_size > 0);
+		hfree(fifo->array, M_HAMMER2,
+		    xop->fifo_size * sizeof(hammer2_chain_t *));
+		hfree(fifo->errors, M_HAMMER2, xop->fifo_size * sizeof(int));
+		if (fifo->brefs) {
+			hfree(fifo->brefs, M_HAMMER2,
+			    xop->fifo_size * sizeof(hammer2_blockref_t));
+			fifo->brefs = NULL;
+		}
+	}
+
+	if (xop->scratch)
+		hfree(xop->scratch, M_HAMMER2, hammer2_get_logical());
+
+	uma_zfree(hammer2_zone_xops, xop);
 }
 
-int
-hammer2_xop_active(hammer2_xop_head_t *xop)
-{
-	if (xop->run_mask & HAMMER2_XOPMASK_VOP)
-		return 1;
-	else
-		return 0;
-}
-
-int
-hammer2_xop_feed(hammer2_xop_head_t *xop, hammer2_chain_t *chain,
-		 int clindex, int error)
+static int
+hammer2_xop_feed_slot(hammer2_xop_head_t *xop, hammer2_chain_t *chain,
+    const hammer2_blockref_t *bref, int clindex, int error)
 {
 	hammer2_xop_fifo_t *fifo;
-	uint64_t mask;
+	size_t old_fifo_size;
 
 	if (hammer2_xop_active(xop) == 0) {
 		error = HAMMER2_ERROR_ABORTED;
@@ -559,42 +607,103 @@ hammer2_xop_feed(hammer2_xop_head_t *xop, hammer2_chain_t *chain,
 
 	fifo = &xop->collect[clindex];
 
-	if (fifo->ri == fifo->wi - HAMMER2_XOPFIFO)
-		lwkt_yield();
-	while (fifo->ri == fifo->wi - HAMMER2_XOPFIFO) {
-		atomic_set_int(&fifo->flags, HAMMER2_XOP_FIFO_STALL);
-		mask = xop->run_mask;
-		if ((mask & HAMMER2_XOPMASK_VOP) == 0) {
+	if ((chain || bref) && (xop->flags & HAMMER2_XOP_FIFO_BOUND)) {
+		int bound = xop->fifo_bound ? xop->fifo_bound :
+		    HAMMER2_XOPFIFO_BOUND;
+		if (fifo->wi >= bound) {
 			error = HAMMER2_ERROR_ABORTED;
 			goto done;
 		}
-		tsleep_interlock(xop, 0);
-		if (atomic_cmpset_64(&xop->run_mask, mask,
-				     mask | HAMMER2_XOPMASK_FIFOW)) {
-			if (fifo->ri == fifo->wi - HAMMER2_XOPFIFO) {
-				tsleep(xop, PINTERLOCKED, "h2feed", hz*60);
-			}
-		}
 	}
-	atomic_clear_int(&fifo->flags, HAMMER2_XOP_FIFO_STALL);
+
+	while (fifo->ri == fifo->wi - xop->fifo_size) {
+		if ((xop->run_mask & HAMMER2_XOPMASK_VOP) == 0) {
+			error = HAMMER2_ERROR_ABORTED;
+			goto done;
+		}
+
+		if ((xop->flags & HAMMER2_XOP_FIFO_BOUND) &&
+		    xop->fifo_size >= (xop->fifo_bound ? xop->fifo_bound :
+		    HAMMER2_XOPFIFO_BOUND)) {
+			error = HAMMER2_ERROR_ABORTED;
+			goto done;
+		}
+		old_fifo_size = xop->fifo_size;
+		xop->fifo_size *= 2;
+		hammer2_xop_fifo_alloc(fifo, xop->fifo_size, old_fifo_size,
+		    xop->flags & HAMMER2_XOP_FIFO_BREF);
+	}
+
 	if (chain)
 		hammer2_chain_ref_hold(chain);
 	if (error == 0 && chain)
 		error = chain->error;
-	fifo->errors[fifo->wi & HAMMER2_XOPFIFO_MASK] = error;
-	fifo->array[fifo->wi & HAMMER2_XOPFIFO_MASK] = chain;
-	cpu_sfence();
+	fifo->errors[fifo->wi & fifo_mask(xop)] = error;
+	fifo->array[fifo->wi & fifo_mask(xop)] = chain;
+	if (bref) {
+		fifo->brefs[fifo->wi & fifo_mask(xop)] = *bref;
+	} else if (xop->flags & HAMMER2_XOP_FIFO_BREF) {
+
+		fifo->brefs[fifo->wi & fifo_mask(xop)].type =
+		    HAMMER2_BREF_TYPE_EMPTY;
+	}
 	++fifo->wi;
 
-	mask = atomic_fetchadd_64(&xop->run_mask, HAMMER2_XOPMASK_FEED);
-	if (mask & HAMMER2_XOPMASK_WAIT) {
-		atomic_clear_64(&xop->run_mask, HAMMER2_XOPMASK_WAIT);
-		wakeup(xop);
-	}
 	error = 0;
-
 done:
-	return error;
+	return (error);
+}
+
+int
+hammer2_xop_feed(hammer2_xop_head_t *xop, hammer2_chain_t *chain, int clindex,
+    int error)
+{
+	return (hammer2_xop_feed_slot(xop, chain, NULL, clindex, error));
+}
+
+int
+hammer2_xop_feed_bref(hammer2_xop_head_t *xop, const hammer2_blockref_t *bref,
+    hammer2_chain_t *chain, int clindex, int error)
+{
+	KKASSERT(xop->flags & HAMMER2_XOP_FIFO_BREF);
+	KKASSERT(bref != NULL && bref->type != HAMMER2_BREF_TYPE_EMPTY);
+
+	return (hammer2_xop_feed_slot(xop, chain, bref, clindex, error));
+}
+
+int
+hammer2_xop_collect_bref(hammer2_xop_head_t *xop, hammer2_blockref_t *brefp,
+    hammer2_chain_t **chainp)
+{
+	hammer2_xop_fifo_t *fifo = &xop->collect[0];
+	int error, i;
+
+	KKASSERT(xop->flags & HAMMER2_XOP_FIFO_BREF);
+	KKASSERT(xop->cluster.nchains == 1);
+
+	*chainp = NULL;
+
+	if (xop->cluster.array[0].chain) {
+		hammer2_chain_drop_unhold(xop->cluster.array[0].chain);
+		xop->cluster.array[0].chain = NULL;
+	}
+
+	if (fifo->ri == fifo->wi)
+		return (HAMMER2_ERROR_ENOENT);
+
+	i = fifo->ri & fifo_mask(xop);
+	error = fifo->errors[i];
+	*chainp = fifo->array[i];
+	*brefp = fifo->brefs[i];
+	xop->cluster.array[0].chain = *chainp;
+	++fifo->ri;
+
+	if (brefp->type == HAMMER2_BREF_TYPE_EMPTY) {
+		if (error == 0 || error == HAMMER2_ERROR_ABORTED)
+			return (HAMMER2_ERROR_ENOENT);
+		return (error);
+	}
+	return (error);
 }
 
 int
@@ -603,17 +712,10 @@ hammer2_xop_collect(hammer2_xop_head_t *xop, int flags)
 	hammer2_xop_fifo_t *fifo;
 	hammer2_chain_t *chain;
 	hammer2_key_t lokey;
-	uint64_t mask;
-	int error;
-	int keynull;
-	int adv;
-	int i;
+	int i, keynull, adv, error;
 
-loop:
 	lokey = HAMMER2_KEY_MAX;
 	keynull = HAMMER2_CHECK_NULL;
-	mask = xop->run_mask;
-	cpu_lfence();
 
 	for (i = 0; i < xop->cluster.nchains; ++i) {
 		chain = xop->cluster.array[i].chain;
@@ -635,235 +737,28 @@ loop:
 
 		fifo = &xop->collect[i];
 		if (fifo->ri != fifo->wi) {
-			cpu_lfence();
-			chain = fifo->array[fifo->ri & HAMMER2_XOPFIFO_MASK];
-			error = fifo->errors[fifo->ri & HAMMER2_XOPFIFO_MASK];
+			chain = fifo->array[fifo->ri & fifo_mask(xop)];
+			error = fifo->errors[fifo->ri & fifo_mask(xop)];
 			++fifo->ri;
 			xop->cluster.array[i].chain = chain;
 			xop->cluster.array[i].error = error;
-			if (chain == NULL) {
+			if (chain == NULL)
 				xop->cluster.array[i].flags |=
-							HAMMER2_CITEM_NULL;
-			}
-			if (fifo->wi - fifo->ri <= HAMMER2_XOPFIFO / 2) {
-				if (fifo->flags & HAMMER2_XOP_FIFO_STALL) {
-					atomic_clear_int(&fifo->flags,
-						    HAMMER2_XOP_FIFO_STALL);
-					wakeup(xop);
-					lwkt_yield();
-				}
-			}
+				    HAMMER2_CITEM_NULL;
 			--i;
 		} else {
+
 			xop->cluster.array[i].chain = NULL;
+
 		}
 	}
 
-	if ((flags & HAMMER2_XOP_COLLECT_WAITALL) &&
-	    (mask & HAMMER2_XOPMASK_ALLDONE) != HAMMER2_XOPMASK_VOP) {
-		error = HAMMER2_ERROR_EINPROGRESS;
-	} else {
-		error = hammer2_cluster_check(&xop->cluster, lokey, keynull);
-	}
-	if (error == HAMMER2_ERROR_EINPROGRESS) {
-		if (flags & HAMMER2_XOP_COLLECT_NOWAIT)
-			goto done;
-		tsleep_interlock(xop, 0);
-		if (atomic_cmpset_64(&xop->run_mask,
-				     mask, mask | HAMMER2_XOPMASK_WAIT)) {
-			tsleep(xop, PINTERLOCKED, "h2coll", hz*60);
-		}
-		goto loop;
-	}
-	if (error == HAMMER2_ERROR_ESRCH) {
-		if (lokey != HAMMER2_KEY_MAX) {
-			xop->collect_key = lokey + 1;
-			goto loop;
-		}
-		error = HAMMER2_ERROR_ENOENT;
-	}
-	if (error == HAMMER2_ERROR_EDEADLK) {
-		kprintf("hammer2: no quorum possible lokey %016jx\n",
-			lokey);
-		if (lokey != HAMMER2_KEY_MAX) {
-			xop->collect_key = lokey + 1;
-			goto loop;
-		}
-		error = HAMMER2_ERROR_ENOENT;
-	}
+	error = hammer2_cluster_check(&xop->cluster, lokey, keynull);
+
 	if (lokey == HAMMER2_KEY_MAX)
 		xop->collect_key = lokey;
 	else
 		xop->collect_key = lokey + 1;
-done:
-	return error;
-}
 
-#define XOP_HASH_SIZE	16
-#define XOP_HASH_MASK	(XOP_HASH_SIZE - 1)
-
-static __inline
-int
-xop_testhash(hammer2_thread_t *thr, hammer2_inode_t *ip, uint32_t *hash)
-{
-	uint32_t mask;
-	int hv;
-
-	hv = (int)((uintptr_t)ip + (uintptr_t)thr) / sizeof(hammer2_inode_t);
-	mask = 1U << (hv & 31);
-	hv >>= 5;
-
-	return ((int)(hash[hv & XOP_HASH_MASK] & mask));
-}
-
-static __inline
-void
-xop_sethash(hammer2_thread_t *thr, hammer2_inode_t *ip, uint32_t *hash)
-{
-	uint32_t mask;
-	int hv;
-
-	hv = (int)((uintptr_t)ip + (uintptr_t)thr) / sizeof(hammer2_inode_t);
-	mask = 1U << (hv & 31);
-	hv >>= 5;
-
-	hash[hv & XOP_HASH_MASK] |= mask;
-}
-
-static
-hammer2_xop_head_t *
-hammer2_xop_next(hammer2_thread_t *thr)
-{
-	hammer2_pfs_t *pmp = thr->pmp;
-	int clindex = thr->clindex;
-	uint32_t hash[XOP_HASH_SIZE] = { 0 };
-	hammer2_xop_head_t *xop;
-
-	hammer2_spin_ex(&pmp->xop_spin);
-	TAILQ_FOREACH(xop, &thr->xopq, collect[clindex].entry) {
-		if (xop_testhash(thr, xop->ip1, hash) ||
-		    (xop->ip2 && xop_testhash(thr, xop->ip2, hash)) ||
-		    (xop->ip3 && xop_testhash(thr, xop->ip3, hash)) ||
-		    (xop->ip4 && xop_testhash(thr, xop->ip4, hash)))
-		{
-			continue;
-		}
-		xop_sethash(thr, xop->ip1, hash);
-		if (xop->ip2)
-			xop_sethash(thr, xop->ip2, hash);
-		if (xop->ip3)
-			xop_sethash(thr, xop->ip3, hash);
-		if (xop->ip4)
-			xop_sethash(thr, xop->ip4, hash);
-
-		if (xop->collect[clindex].flags & HAMMER2_XOP_FIFO_RUN)
-			continue;
-
-		atomic_set_int(&xop->collect[clindex].flags,
-			       HAMMER2_XOP_FIFO_RUN);
-		break;
-	}
-	hammer2_spin_unex(&pmp->xop_spin);
-
-	return xop;
-}
-
-static
-void
-hammer2_xop_dequeue(hammer2_thread_t *thr, hammer2_xop_head_t *xop)
-{
-	hammer2_pfs_t *pmp = thr->pmp;
-	int clindex = thr->clindex;
-
-	hammer2_spin_ex(&pmp->xop_spin);
-	TAILQ_REMOVE(&thr->xopq, xop, collect[clindex].entry);
-	atomic_clear_int(&xop->collect[clindex].flags,
-			 HAMMER2_XOP_FIFO_RUN);
-	hammer2_spin_unex(&pmp->xop_spin);
-	if (TAILQ_FIRST(&thr->xopq))
-		hammer2_thr_signal(thr, HAMMER2_THREAD_XOPQ);
-}
-
-void
-hammer2_primary_xops_thread(void *arg)
-{
-	hammer2_thread_t *thr = arg;
-	hammer2_xop_head_t *xop;
-	uint64_t mask;
-	uint32_t flags;
-	uint32_t nflags;
-
-	mask = 1LLU << thr->clindex;
-
-	for (;;) {
-		flags = thr->flags;
-
-		if (flags & HAMMER2_THREAD_STOP)
-			break;
-
-		if (flags & HAMMER2_THREAD_FREEZE) {
-			hammer2_thr_signal2(thr, HAMMER2_THREAD_FROZEN,
-						 HAMMER2_THREAD_FREEZE);
-			continue;
-		}
-
-		if (flags & HAMMER2_THREAD_UNFREEZE) {
-			hammer2_thr_signal2(thr, 0,
-						 HAMMER2_THREAD_FROZEN |
-						 HAMMER2_THREAD_UNFREEZE);
-			continue;
-		}
-
-		if (flags & HAMMER2_THREAD_FROZEN) {
-			hammer2_thr_wait_any(thr,
-					     HAMMER2_THREAD_UNFREEZE |
-					     HAMMER2_THREAD_STOP,
-					     0);
-			continue;
-		}
-
-		if (flags & HAMMER2_THREAD_REMASTER) {
-			hammer2_thr_signal2(thr, 0, HAMMER2_THREAD_REMASTER);
-			continue;
-		}
-
-		if (flags & HAMMER2_THREAD_XOPQ) {
-			nflags = flags & ~HAMMER2_THREAD_XOPQ;
-			if (!atomic_cmpset_int(&thr->flags, flags, nflags))
-				continue;
-			flags = nflags;
-		}
-		while ((xop = hammer2_xop_next(thr)) != NULL) {
-			if (hammer2_xop_active(xop)) {
-				xop->desc->storage_func((hammer2_xop_t *)xop,
-							thr->scratch,
-							thr->clindex);
-				hammer2_xop_dequeue(thr, xop);
-				hammer2_xop_retire(xop, mask);
-			} else {
-				hammer2_xop_feed(xop, NULL, thr->clindex,
-						 ECONNABORTED);
-				hammer2_xop_dequeue(thr, xop);
-				hammer2_xop_retire(xop, mask);
-			}
-		}
-
-		nflags = flags | HAMMER2_THREAD_WAITING;
-
-		tsleep_interlock(&thr->flags, 0);
-		if (atomic_cmpset_int(&thr->flags, flags, nflags)) {
-			tsleep(&thr->flags, PINTERLOCKED, "h2idle", hz*30);
-		}
-	}
-
-#if 0
-	while ((xop = TAILQ_FIRST(&thr->xopq)) != NULL) {
-		kprintf("hammer2_thread: aborting xop %s\n", xop->desc->id);
-		TAILQ_REMOVE(&thr->xopq, xop,
-			     collect[thr->clindex].entry);
-		hammer2_xop_retire(xop, mask);
-	}
-#endif
-	thr->td = NULL;
-	hammer2_thr_signal(thr, HAMMER2_THREAD_STOPPED);
+	return (error);
 }

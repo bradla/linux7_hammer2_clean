@@ -1,12 +1,3 @@
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/mount.h>
-#include <sys/uuid.h>
-#include <sys/socket.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-
 #include "hammer2.h"
 
 static int hammer2_rcvdmsg(kdmsg_msg_t *msg);
@@ -16,6 +7,7 @@ static int hammer2_lnk_span_reply(kdmsg_state_t *state, kdmsg_msg_t *msg);
 void
 hammer2_iocom_init(hammer2_dev_t *hmp)
 {
+
 	kdmsg_iocom_init(&hmp->iocom, hmp,
 			 KDMSG_IOCOMF_AUTOCONN |
 			 KDMSG_IOCOMF_AUTORXSPAN,
@@ -25,6 +17,7 @@ hammer2_iocom_init(hammer2_dev_t *hmp)
 void
 hammer2_iocom_uninit(hammer2_dev_t *hmp)
 {
+
 	if (hmp->iocom.mmsg)
 		kdmsg_iocom_uninit(&hmp->iocom);
 }
@@ -32,10 +25,12 @@ hammer2_iocom_uninit(hammer2_dev_t *hmp)
 void
 hammer2_cluster_reconnect(hammer2_dev_t *hmp, struct file *fp)
 {
+
 	kdmsg_iocom_reconnect(&hmp->iocom, fp, "hammer2");
 
 	bzero(&hmp->iocom.auto_lnk_conn.peer_id,
 	      sizeof(hmp->iocom.auto_lnk_conn.peer_id));
+
 	hmp->iocom.auto_lnk_conn.proto_version = DMSG_SPAN_PROTO_1;
 #if 0
 	hmp->iocom.auto_lnk_conn.peer_type = hmp->voldata.peer_type;
@@ -71,15 +66,18 @@ hammer2_rcvdmsg(kdmsg_msg_t *msg)
 
 	switch(msg->tcmd) {
 	case DMSG_DBG_SHELL:
+
 		kdmsg_msg_result(msg, DMSG_ERR_NOSUPP);
 		break;
 	case DMSG_DBG_SHELL | DMSGF_REPLY:
+
 		if (msg->aux_data) {
 			msg->aux_data[msg->aux_size - 1] = 0;
 			kprintf("HAMMER2 DBG: %s\n", msg->aux_data);
 		}
 		break;
 	default:
+
 		if (msg->any.head.cmd & DMSGF_CREATE)
 			kdmsg_msg_reply(msg, DMSG_ERR_NOSUPP);
 		break;
@@ -99,21 +97,14 @@ hammer2_autodmsg(kdmsg_msg_t *msg)
 	case DMSG_LNK_CONN | DMSGF_CREATE:
 	case DMSG_LNK_CONN | DMSGF_CREATE | DMSGF_DELETE:
 	case DMSG_LNK_CONN | DMSGF_DELETE:
+
 		break;
 	case DMSG_LNK_CONN | DMSGF_CREATE | DMSGF_REPLY:
 	case DMSG_LNK_CONN | DMSGF_CREATE | DMSGF_DELETE | DMSGF_REPLY:
+
 		if (msg->any.head.cmd & DMSGF_CREATE) {
-			kprintf("HAMMER2: VOLDATA DUMP\n");
 
-			hammer2_voldata_lock(hmp);
-			copyid = 0;
-			while (copyid < HAMMER2_COPYID_COUNT) {
-				if (hmp->voldata.copyinfo[copyid].copyid)
-					hammer2_volconf_update(hmp, copyid);
-				++copyid;
-			}
-			hammer2_voldata_unlock(hmp);
-
+			(void)copyid;
 			kprintf("HAMMER2: INITIATE SPANs\n");
 			hammer2_update_spans(hmp, msg->state);
 		}
@@ -123,6 +114,7 @@ hammer2_autodmsg(kdmsg_msg_t *msg)
 		}
 		break;
 	case DMSG_LNK_SPAN | DMSGF_CREATE:
+
 		if (msg->any.lnk_span.peer_type != DMSG_PEER_HAMMER2) {
 			kdmsg_msg_reply(msg, 0);
 			break;
@@ -144,6 +136,7 @@ hammer2_autodmsg(kdmsg_msg_t *msg)
 		kdmsg_msg_result(msg, 0);
 		break;
 	case DMSG_LNK_SPAN | DMSGF_DELETE:
+
 		if (hammer2_debug & 0x0100)
 			kprintf("H2 -RXSPAN\n");
 		break;
@@ -186,8 +179,11 @@ hammer2_update_spans(hammer2_dev_t *hmp, kdmsg_state_t *state)
 		rmsg = kdmsg_msg_alloc(&hmp->iocom.state0,
 				       DMSG_LNK_SPAN | DMSGF_CREATE,
 				       hammer2_lnk_span_reply, NULL);
-		rmsg->any.lnk_span.peer_id = ripdata->meta.pfs_clid;
-		rmsg->any.lnk_span.pfs_id = ripdata->meta.pfs_fsid;
+
+		memcpy(&rmsg->any.lnk_span.peer_id, &ripdata->meta.pfs_clid,
+		       sizeof(rmsg->any.lnk_span.peer_id));
+		memcpy(&rmsg->any.lnk_span.pfs_id, &ripdata->meta.pfs_fsid,
+		       sizeof(rmsg->any.lnk_span.pfs_id));
 		rmsg->any.lnk_span.pfs_type = ripdata->meta.pfs_type;
 		rmsg->any.lnk_span.peer_type = DMSG_PEER_HAMMER2;
 		rmsg->any.lnk_span.proto_version = DMSG_SPAN_PROTO_1;
@@ -201,10 +197,11 @@ hammer2_update_spans(hammer2_dev_t *hmp, kdmsg_state_t *state)
 		kdmsg_msg_write(rmsg);
 
 		chain = hammer2_chain_next(&parent, chain, &key_next,
-					       key_next, HAMMER2_KEY_MAX,
+					       HAMMER2_KEY_MAX,
 					       &error, 0);
 	}
 	hammer2_inode_unlock(spmp->iroot);
+
 done:
 	if (chain) {
 		hammer2_chain_unlock(chain);
@@ -230,17 +227,6 @@ hammer2_lnk_span_reply(kdmsg_state_t *state, kdmsg_msg_t *msg)
 void
 hammer2_volconf_update(hammer2_dev_t *hmp, int index)
 {
-	kdmsg_msg_t *msg;
-
-	kprintf("volconf update %p\n", hmp->iocom.conn_state);
-	if (hmp->iocom.conn_state) {
-		kprintf("TRANSMIT VOLCONF VIA OPEN CONN TRANSACTION\n");
-		msg = kdmsg_msg_alloc(hmp->iocom.conn_state,
-				      DMSG_LNK_HAMMER2_VOLCONF,
-				      NULL, NULL);
-		H2_LNK_VOLCONF(msg)->copy = hmp->voldata.copyinfo[index];
-		H2_LNK_VOLCONF(msg)->mediaid = hmp->voldata.fsid;
-		H2_LNK_VOLCONF(msg)->index = index;
-		kdmsg_msg_write(msg);
-	}
+	(void)hmp;
+	(void)index;
 }
